@@ -9,7 +9,7 @@ buffered boundaries.
 
 import FreeCAD
 import Part
-from ....freecad_helpers import get_up_direction_rotation
+from ....freecad_helpers import get_up_direction_rotation, get_geometry_bounding_box
 
 
 class EdgeOnProfileError(ValueError):
@@ -47,8 +47,8 @@ def get_2d_profile_from_obj(obj, up_direction="Z+", tessellation_quality=0.1, si
     
     if needs_rotation:
         # Rotate the shape around its center
-        # Use BoundBox center to be safe for Compounds
-        bb = shape.BoundBox
+        # Tight geometric bounds also work for Compounds and trimmed surfaces
+        bb = get_geometry_bounding_box(shape)
         center = FreeCAD.Vector(
             (bb.XMin + bb.XMax) / 2,
             (bb.YMin + bb.YMax) / 2,
@@ -60,7 +60,7 @@ def get_2d_profile_from_obj(obj, up_direction="Z+", tessellation_quality=0.1, si
             FreeCAD.Console.PrintMessage(f"  -> Rotated shape for up_direction={up_direction}\n")
     
     # Always center the shape using bounding box center (for both rotated and non-rotated)
-    bb = shape.BoundBox
+    bb = get_geometry_bounding_box(shape)
     translation = FreeCAD.Vector(
         -(bb.XMin + bb.XMax) / 2,
         -(bb.YMin + bb.YMax) / 2,
@@ -241,7 +241,7 @@ def get_2d_profile_from_obj(obj, up_direction="Z+", tessellation_quality=0.1, si
              return hull
         
         # Absolute Fallback: use BoundBox
-        bb = shape.BoundBox
+        bb = get_geometry_bounding_box(shape)
         if bb.XMax > bb.XMin and bb.YMax > bb.YMin:
             FreeCAD.Console.PrintWarning(f"  -> Using bounding box for '{obj.Label}'\n")
             return box(bb.XMin, bb.YMin, bb.XMax, bb.YMax)
@@ -286,7 +286,7 @@ def create_single_nesting_part(shape_to_populate, shape_obj, spacing, deflection
         temp_shape.transformShape(shape_obj.Placement.Matrix)
     
     # Get BB center BEFORE rotation - this is the offset for centering
-    bb = temp_shape.BoundBox
+    bb = get_geometry_bounding_box(temp_shape)
     source_centroid = FreeCAD.Vector(
         (bb.XMin + bb.XMax) / 2,
         (bb.YMin + bb.YMax) / 2,

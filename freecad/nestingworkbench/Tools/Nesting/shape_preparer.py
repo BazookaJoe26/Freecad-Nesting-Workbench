@@ -8,7 +8,9 @@ import traceback
 from .algorithms import shape_processor
 from ...datatypes.shape_object import create_shape_object
 from ...datatypes.shape import Shape
-from ...freecad_helpers import get_up_direction_rotation, create_part_feature
+from ...freecad_helpers import (
+    get_up_direction_rotation, create_part_feature, get_geometry_bounding_box,
+)
 from ...constants import (
     PROP_BOOL, PROP_INTEGER, PROP_STRING,
     PROP_QUANTITY, PROP_UP_DIRECTION, PROP_FILL_SHEET,
@@ -184,7 +186,7 @@ class ShapePreparer:
         if original_container and hasattr(original_container, "SourceCentroid"):
             temp_container.SourceCentroid = original_container.SourceCentroid
         else:
-            bb = master_obj.Shape.BoundBox
+            bb = get_geometry_bounding_box(master_obj.Shape)
             temp_container.SourceCentroid = FreeCAD.Vector(
                  (bb.XMin + bb.XMax) / 2,
                  (bb.YMin + bb.YMax) / 2,
@@ -278,7 +280,7 @@ class ShapePreparer:
             temp_shape = master_obj.Shape.copy()
             if master_obj.Placement and not master_obj.Placement.isIdentity():
                 temp_shape.transformShape(master_obj.Placement.Matrix)
-            bb = temp_shape.BoundBox
+            bb = get_geometry_bounding_box(temp_shape)
             source_centroid = FreeCAD.Vector((bb.XMin + bb.XMax) / 2, (bb.YMin + bb.YMax) / 2, (bb.ZMin + bb.ZMax) / 2)
 
         master_container, up_direction = self._create_master_container(label, quantities, source_centroid)

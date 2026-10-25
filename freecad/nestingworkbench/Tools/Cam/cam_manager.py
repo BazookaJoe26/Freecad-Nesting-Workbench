@@ -8,7 +8,7 @@ and managing CAM jobs from the nested layouts.
 
 import FreeCAD
 from ...constants import *
-from ...freecad_helpers import get_nested_containers
+from ...freecad_helpers import get_nested_containers, get_geometry_bounding_box
 
 FALLBACK_SHEET_WIDTH_MM = 600.0   # used only when the layout group has no SheetWidth property
 FALLBACK_SHEET_HEIGHT_MM = 600.0
@@ -105,17 +105,17 @@ class CAMManager:
                     
                     if include_parts and child.Label.startswith("part_"):
                         # Adjust Z so bottom is at Z = -sheet_thickness
-                        z_min = transformed_shape.BoundBox.ZMin
+                        z_min = get_geometry_bounding_box(transformed_shape).ZMin
                         z_offset = -sheet_thickness - z_min
                         z_placement = FreeCAD.Placement(FreeCAD.Vector(-sheet_origin.x, -sheet_origin.y, z_offset), FreeCAD.Rotation())
                         transformed_shape = transformed_shape.transformGeometry(z_placement.toMatrix())
-                        if abs(transformed_shape.BoundBox.ZLength - sheet_thickness) > THICKNESS_MATCH_TOL_MM:
+                        if abs(get_geometry_bounding_box(transformed_shape).ZLength - sheet_thickness) > THICKNESS_MATCH_TOL_MM:
                             thickness_mismatches.append(child.Label)
                         parts_shapes.append(transformed_shape)
                     
                     elif include_labels and child.Label.startswith("label_"):
                         # Labels at Z = 0
-                        z_min = transformed_shape.BoundBox.ZMin
+                        z_min = get_geometry_bounding_box(transformed_shape).ZMin
                         z_offset = -z_min
                         z_placement = FreeCAD.Placement(FreeCAD.Vector(-sheet_origin.x, -sheet_origin.y, z_offset), FreeCAD.Rotation())
                         transformed_shape = transformed_shape.transformGeometry(z_placement.toMatrix())

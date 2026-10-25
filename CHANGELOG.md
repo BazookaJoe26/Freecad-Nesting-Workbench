@@ -5,6 +5,11 @@ All notable changes to the FreeCAD Nesting Workbench will be documented in this 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Releases are named by month and year (e.g. 9-26); the manifest version is year.month.patch (e.g. 2026.9.0).
 
+## [Unreleased]
+
+### Fixed
+- Flat parts with trimmed B-spline surfaces now use tight geometric bounds for nesting centering and CAM stock alignment. Oversized surface bounds could place a part above or below the other nested parts despite matching thickness.
+
 ## [9-26] - 2026-09-25
 
 Version 2026.9.0.

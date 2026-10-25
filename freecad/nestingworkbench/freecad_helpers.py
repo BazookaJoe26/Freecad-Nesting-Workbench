@@ -13,6 +13,18 @@ except ImportError:
 
 from .constants import LAYOUT_PREFIX
 
+def get_geometry_bounding_box(shape):
+    """Return tight bounds of the trimmed geometry, independent of display mesh.
+
+    Shape.BoundBox can include the underlying B-spline surface outside its
+    trimming wires, especially after copying a shape without its triangulation.
+    Using that box for centering or stock alignment shifts otherwise flat parts.
+    Disable triangulation and tolerance inflation so fresh and displayed shapes
+    use the same geometric bounds. FreeCAD 1.0+ provides optimalBoundingBox.
+    """
+    return shape.optimalBoundingBox(False, False)
+
+
 def get_up_direction_rotation(up_direction):
     """
     Returns a FreeCAD.Rotation that transforms the given up_direction to Z+.
