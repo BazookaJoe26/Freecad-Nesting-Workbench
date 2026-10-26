@@ -7,7 +7,16 @@ Releases are named by month and year (e.g. 9-26); the manifest version is year.m
 
 ## [Unreleased]
 
+### Added
+- Native numeric length fields with fx expression editing for Sheet Width, Sheet Height, Sheet Thickness and Part Spacing. Formulas are remembered and restored with layouts, and re-evaluated for each nesting run within the existing limits.
+- **Custom Edge Spacing** separates sheet-edge clearance from Part Spacing. By default parts may sit flush with sheet edges while retaining their spacing from other parts; an optional independent edge margin is supported by Minkowski, Physics, GA workers and Fill and saved with the layout.
+- **Sheet Grain Direction** is optional: **None** disables grain constraints for the entire nesting run and is remembered along with the other settings.
+- Nesting panel inputs are remembered immediately, including both algorithms' options, font, sheet grain and per-object quantity/orientation settings. Closing or cancelling without a run keeps the last settings; saved layout settings retain priority when re-nesting.
+- Per-part **Grain Dir** and **Sheet Grain Direction** for grain-aware nesting of wood and other directional materials. Alignment permits 180° turns and is preserved through GA optimization, Physics shaking, Fill copies and saved layouts.
+- X, Y and Z layout offsets with FreeCAD's native numeric length fields and fx expression editor, supporting signed lengths and live FreeCAD expressions (including Spreadsheet aliases). Sheets, parts and labels move together; expressions are restored when reopening a layout and preserved during manual nesting and stacking.
+
 ### Fixed
+- Sheets now display their configured thickness as solid stock centred on the former plane, extending equally above and below it, including simulation and manually added sheets. DXF export keeps a single 2D outline; nesting coordinates and CAM reference planes are preserved.
 - Flat parts with trimmed B-spline surfaces now use tight geometric bounds for nesting centering and CAM stock alignment. Oversized surface bounds could place a part above or below the other nested parts despite matching thickness.
 
 ## [9-26] - 2026-09-25

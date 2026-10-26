@@ -13,12 +13,17 @@ from ...datatypes.shape import Shape
 from .shape_preparer import ShapePreparer
 from .layout_manager import LayoutManager, Layout
 from .ga_coordinator import GACoordinator
+from .cancellation import NestingCancelled
 from ...freecad_helpers import (recursive_delete, set_master_shapes_visible,
                                hide_all_master_shapes)
 from ...constants import *
 from ...ui_helpers import closest_angle_index
 from .nesting_job import NestingJob
 from ... import DEFAULT_FONT
+from ...layout_offsets import evaluate_offsets
+from ...freecad_helpers import grain_rotation_angles
+from ...panel_preferences import load_part_settings
+from ...edge_spacing import effective_edge_spacing
 
 DEFLECTION_ANGLE_PER_MM = 200.0  # legacy UI scale: deflection_angle = deflection_mm * 200
 
@@ -83,6 +88,8 @@ class NestingWorker(QThread):
         self._draw_event.clear()
         nesting_logic._main_thread_relay.post(lambda: self.draw_requested.emit(payload))
         self._draw_event.wait()
+        if '_error' in payload:
+            raise payload['_error']
     
     def notify_draw_complete(self):
         """Called from main thread after draw finishes."""
@@ -151,6 +158,13 @@ class NestingController:
 
     def execute_nesting(self):
         FreeCAD.Console.PrintMessage("\n--- NESTING START ---\n")
+
+        try:
+            ui_params = self._collect_ui_params()
+            ui_params, quantities, master_map, rotation_params = self._collect_job_parameters(ui_params)
+        except ValueError as exc:
+            self.ui.log_message(str(exc), level="error")
+            return
         
         if self.current_job:
             self.current_job.cleanup()
@@ -171,9 +185,6 @@ class NestingController:
         # reads as a doubled, misaligned outline. Only the row being packed shows.
         hide_all_master_shapes(self.doc)
 
-        ui_params = self._collect_ui_params()
-        ui_params, quantities, master_map, rotation_params = self._collect_job_parameters(ui_params)
-        
         algo_kwargs = self._prepare_algo_kwargs(ui_params)
         verbose = self.ui.verbose_logging_checkbox.isChecked()
         algo_kwargs['verbose'] = verbose
@@ -268,6 +279,10 @@ class NestingController:
     def _load_params_from_layout(self, layout_group):
         """Extracts algorithm parameters from layout properties."""
         missing = []
+        expressions = dict(layout_group.ExpressionEngine)
+        for axis, prop in zip("xyz", LAYOUT_OFFSET_PROPERTIES):
+            value = expressions.get(prop, str(getattr(layout_group, prop, "0 mm")))
+            getattr(self.ui, f"offset_{axis}_input").setText(value)
         props_map = {
             PROP_SHEET_WIDTH: self.ui.sheet_width_input,
             PROP_SHEET_HEIGHT: self.ui.sheet_height_input,
@@ -285,9 +300,20 @@ class NestingController:
         for prop, widget in props_map.items():
             val = getattr(layout_group, prop, None)
             if val is not None:
-                widget.setValue(val)
+                if prop in {p for p, _ in SHEET_LENGTH_FIELDS.values()}:
+                    expression = getattr(layout_group, prop + "Expression", "") or expressions.get(prop, "")
+                    if expression:
+                        widget.setText(expression)
+                    else:
+                        widget.setValue(float(val))
+                else:
+                    widget.setValue(val)
             else:
                 missing.append(f"{_LAYOUT_SETTING_LABELS.get(prop, prop)} (defaulted)")
+
+        self.ui.custom_edge_spacing_checkbox.setChecked(
+            bool(getattr(layout_group, PROP_CUSTOM_EDGE_SPACING, False)))
+        self.ui.edge_spacing_input.setValue(float(getattr(layout_group, PROP_EDGE_SPACING, 0.0)))
 
         # Deflection has three outcomes and only one of them is a real default.
         deflection_angle = getattr(layout_group, PROP_DEFLECTION_ANGLE, None)
@@ -332,6 +358,10 @@ class NestingController:
             algo = "Minkowski"
             missing.append("algorithm (defaulted to Minkowski)")
         self.ui.algorithm_dropdown.setCurrentText(algo)
+        self.ui.sheet_grain_direction_combo.setCurrentText(
+            str(getattr(layout_group, PROP_SHEET_GRAIN_DIRECTION, "None")))
+        if not hasattr(layout_group, PROP_SHEET_GRAIN_DIRECTION):
+            missing.append("sheet grain direction (defaulted to None)")
 
         steps = _as_int(getattr(layout_group, PROP_GLOBAL_ROTATION_STEPS, 0), 0)
         if steps > 0:
@@ -356,13 +386,14 @@ class NestingController:
             return [], []
 
         shapes_to_load = []
-        quantities, overrides, steps_map, up_dirs, fill_map = {}, {}, {}, {}, {}
+        quantities, overrides, steps_map, up_dirs, fill_map, grain_dirs = {}, {}, {}, {}, {}, {}
         dropped_masters = []
         
         missing_counts = {
             PROP_PART_ROTATION_OVERRIDE: 0,
             PROP_PART_ROTATION_STEPS: 0,
             PROP_UP_DIRECTION: 0,
+            PROP_GRAIN_DIRECTION: 0,
             PROP_FILL_SHEET: 0,
             PROP_QUANTITY: 0,
         }
@@ -418,6 +449,9 @@ class NestingController:
                     steps_map[label] = raw_steps
 
                 up_dirs[label] = str(getattr(master, PROP_UP_DIRECTION, "Z+"))
+                grain_dirs[label] = str(getattr(master, PROP_GRAIN_DIRECTION, "None"))
+                if not hasattr(master, PROP_GRAIN_DIRECTION):
+                    missing_counts[PROP_GRAIN_DIRECTION] += 1
                 fill_map[label] = _as_bool(getattr(master, PROP_FILL_SHEET, False))
             else:
                 dropped_masters.append(master.Label)
@@ -425,7 +459,8 @@ class NestingController:
         self.load_shapes(
             shapes_to_load, is_reloading_layout=True, initial_quantities=quantities,
             initial_overrides=overrides, initial_rotation_steps=steps_map,
-            initial_up_directions=up_dirs, initial_fill_sheet=fill_map
+            initial_up_directions=up_dirs, initial_fill_sheet=fill_map,
+            initial_grain_directions=grain_dirs
         )
 
         missing_descriptions = []
@@ -441,6 +476,9 @@ class NestingController:
         if missing_counts[PROP_FILL_SHEET] > 0:
             c = missing_counts[PROP_FILL_SHEET]
             missing_descriptions.append(f"fill sheet ({c} {'part' if c == 1 else 'parts'}, defaulted to off)")
+        if missing_counts[PROP_GRAIN_DIRECTION] > 0:
+            c = missing_counts[PROP_GRAIN_DIRECTION]
+            missing_descriptions.append(f"grain direction ({c} {'part' if c == 1 else 'parts'}, defaulted to None)")
         if missing_counts[PROP_QUANTITY] > 0:
             c = missing_counts[PROP_QUANTITY]
             missing_descriptions.append(f"quantity ({c} {'part' if c == 1 else 'parts'}, defaulted to 1)")
@@ -493,7 +531,8 @@ class NestingController:
 
     def load_shapes(self, selection, is_reloading_layout=False, initial_quantities=None, 
                      initial_overrides=None, initial_rotation_steps=None,
-                     initial_up_directions=None, initial_fill_sheet=None):
+                     initial_up_directions=None, initial_fill_sheet=None,
+                     initial_grain_directions=None):
         """Loads a selection of shapes into the UI."""
         self.ui.nest_button.setEnabled(True)
         
@@ -531,30 +570,35 @@ class NestingController:
                 duplicate_labels.add(display_label)
             seen_labels.add(display_label)
 
+            remembered = {} if is_reloading_layout else load_part_settings(obj)
             qty = selection_counts.get(obj, 1)
+            if qty == 1:
+                qty = remembered.get('quantity', qty)
             
             if initial_quantities and obj.Label in initial_quantities:
                 qty = initial_quantities[obj.Label]
                 
-            steps = 4
-            override = False
+            steps = remembered.get('rotation_steps', 4)
+            override = remembered.get('override_rotation', False)
             if initial_rotation_steps and obj.Label in initial_rotation_steps:
                 steps = initial_rotation_steps[obj.Label]
             if initial_overrides and obj.Label in initial_overrides:
                 override = initial_overrides[obj.Label]
             
-            up_dir = "Z+"
+            up_dir = remembered.get('up_direction', "Z+")
             if initial_up_directions and obj.Label in initial_up_directions:
                 up_dir = initial_up_directions[obj.Label]
                 
-            fill = False
+            fill = remembered.get('fill_sheet', False)
             if initial_fill_sheet and obj.Label in initial_fill_sheet:
                 fill = initial_fill_sheet[obj.Label]
 
             add_row_fn = getattr(self.ui, 'add_part_row', getattr(self.ui, '_add_part_row', None))
             if add_row_fn:
                  add_row_fn(i, display_label, quantity=qty, rotation_steps=steps, 
-                            override_rotation=override, up_direction=up_dir, fill_sheet=fill)
+                            override_rotation=override, up_direction=up_dir, fill_sheet=fill,
+                            grain_direction=(initial_grain_directions or {}).get(
+                                obj.Label, remembered.get('grain_direction', "None")))
             
             item = self.ui.shape_table.item(i, 0)
             if item:
@@ -601,10 +645,12 @@ class NestingController:
                 self.ui.shape_table.insertRow(row_position)
                 
                 qty = selection_counts.get(obj, 1)
+                remembered = load_part_settings(obj)
+                remembered['quantity'] = qty if qty > 1 else remembered.get('quantity', qty)
                 
                 add_row_fn = getattr(self.ui, 'add_part_row', getattr(self.ui, '_add_part_row', None))
                 if add_row_fn:
-                    add_row_fn(row_position, display_label, quantity=qty)
+                    add_row_fn(row_position, display_label, **remembered)
                 
                 item = self.ui.shape_table.item(row_position, 0)
                 if item:
@@ -704,6 +750,9 @@ class NestingController:
     def _handle_draw_request(self, payload):
         """Main-thread handler for draw requests from worker."""
         try:
+            if getattr(self, 'cancel_requested', False) and not (
+                    payload.get('cleanup_layouts') or payload.get('doc_recompute_only')):
+                raise NestingCancelled()
             if payload.get('updateGui_only'):
                 FreeCADGui.updateGui()
             elif payload.get('create_population'):
@@ -723,6 +772,9 @@ class NestingController:
                 self._worker.coordinator._pending_layouts = layouts
             elif payload.get('spawn_fill_part'):
                 payload['result_holder'][0] = payload['spawn_fn']()
+            elif payload.get('ga_materialize'):
+                payload['result_holder'][0] = self._worker.coordinator.layout_manager.materialize_layout(
+                    payload['layout'], payload['ui_params'])
             elif payload.get('cleanup_layouts'):
                 for layout in payload['layouts']:
                     if layout != payload['best_layout']:
@@ -748,15 +800,19 @@ class NestingController:
                 coordinator.doc.recompute()
             elif payload.get('doc_recompute_only'):
                 self._worker.coordinator.doc.recompute()
+        except Exception as error:
+            payload['_error'] = error
         finally:
             self._worker.notify_draw_complete()
 
     def _on_nesting_finished(self, job):
         """Main-thread handler for nesting completion."""
         if self.cancel_requested:
+            run_args = getattr(getattr(self, '_worker', None), 'run_args', ())
+            target = job.target_layout if job else (run_args[0] if run_args else None)
             if job:
                 job.cleanup()
-            self.cancel_job()
+            self.cancel_job(target=target)
         else:
             self.current_job = job
             
@@ -833,9 +889,9 @@ class NestingController:
             except Exception:
                 pass  # UI widget may be destroyed if user closed panel while cancelling
             
-            # If worker is running, also unblock it from any draw wait
-            if hasattr(self, '_worker') and self._worker:
-                self._worker.notify_draw_complete() # Unblock if waiting for draw
+            # A document request must acknowledge its own completion. Waking
+            # this wait here could let the worker clean up objects while the
+            # GUI still creates them, or consume the next request's signal.
         else:
             self.cancel_job()
             if hasattr(self.ui, 'reject'):
@@ -844,41 +900,35 @@ class NestingController:
     def _check_cancel(self):
         return self.cancel_requested
 
-    def cancel_job(self):
+    def cancel_job(self, target=None):
         """Called when User clicks Cancel."""
+        had_job = self.current_job is not None
         if self.current_job:
             target = self.current_job.target_layout
-            
             self.current_job.cleanup()
-            
-            if target:
-                try: 
-                    has_content = any(
-                        child.Label.startswith("Sheet_") or child.Label.startswith("MasterShapes")
-                        for child in (target.Group if hasattr(target, "Group") else [])
-                    )
-                    
-                    if not has_content:
-                        recursive_delete(self.doc, target)
-                        if hasattr(self.ui, 'current_layout') and self.ui.current_layout == target:
-                            self.ui.current_layout = None
-                        FreeCAD.Console.PrintMessage("Removed empty target layout.\n")
-                    else:
-                        if hasattr(target, "ViewObject"):
-                            target.ViewObject.Visibility = True
-                        
-                        if hasattr(target, "Group"):
-                            for child in target.Group:
-                                if child.Label.startswith("Sheet_") and hasattr(child, "ViewObject"):
-                                    child.ViewObject.Visibility = True
-
-                        # Cancelling a run does not close the panel, and the
-                        # master row belongs to the panel: leave it on screen.
-                        set_master_shapes_visible(target, True)
-                except Exception as e:
-                    FreeCAD.Console.PrintWarning(f"[NestingController] Cancel cleanup failed for child: {e}\n")
-            
             self.current_job = None
+        # Early cancellation returns no NestingJob. The original target still
+        # needs restoring (or deleting if this run created an empty layout).
+        if target:
+            try:
+                has_content = any(
+                    child.Label.startswith("Sheet_") or child.Label.startswith("MasterShapes")
+                    for child in (target.Group if hasattr(target, "Group") else [])
+                )
+                if not has_content:
+                    recursive_delete(self.doc, target)
+                    if getattr(self.ui, 'current_layout', None) == target:
+                        self.ui.current_layout = None
+                else:
+                    if getattr(target, 'ViewObject', None):
+                        target.ViewObject.Visibility = True
+                    for child in getattr(target, 'Group', []):
+                        if child.Label.startswith("Sheet_") and getattr(child, 'ViewObject', None):
+                            child.ViewObject.Visibility = True
+                    set_master_shapes_visible(target, True)
+            except Exception as e:
+                FreeCAD.Console.PrintWarning(f"[NestingController] Cancel cleanup failed for child: {e}\n")
+        if had_job or target is not None:
             FreeCAD.Console.PrintMessage("Job Cancelled.\n")
             self.doc.recompute()
     
@@ -889,6 +939,10 @@ class NestingController:
         go away with it — including rows belonging to layouts this session never
         touched, which older runs could leave switched on.
         """
+        for axis in "xyz":
+            getattr(self.ui, f"offset_{axis}_input").cleanup()
+        for name in SHEET_LENGTH_FIELDS:
+            getattr(self.ui, name).cleanup()
         try:
             self.viz_manager.clear_highlight()
             hide_all_master_shapes(self.doc)
@@ -963,14 +1017,30 @@ class NestingController:
         return target
 
     def _collect_ui_params(self):
+        offsets, expressions = evaluate_offsets(
+            self.doc,
+            [getattr(self.ui, f"offset_{axis}_input").text() for axis in "xyz"],
+            getattr(self.ui, "current_layout", None),
+        )
+        expressions = [getattr(self.ui, f"offset_{axis}_input").expression() for axis in "xyz"]
+        lengths = {key: getattr(self.ui, name).validatedValue(getattr(self.ui, "current_layout", None))
+                   for name, (_, key) in SHEET_LENGTH_FIELDS.items()}
+        length_expressions = {prop: getattr(self.ui, name).expression()
+                              for name, (prop, _) in SHEET_LENGTH_FIELDS.items()}
         deflection_angle = self.ui.deflection_input.value()
         deflection_mm = deflection_angle / DEFLECTION_ANGLE_PER_MM
         
         settings_dict = {
-            'sheet_width': self.ui.sheet_width_input.value(),
-            'sheet_height': self.ui.sheet_height_input.value(),
-            'spacing': self.ui.part_spacing_input.value(),
-            'sheet_thickness': self.ui.sheet_thickness_input.value(),
+            'layout_offset': offsets,
+            'offset_expressions': expressions,
+            'sheet_width': lengths['sheet_width'],
+            'sheet_height': lengths['sheet_height'],
+            'length_expressions': length_expressions,
+            'sheet_grain_direction': self.ui.sheet_grain_direction_combo.currentText(),
+            'spacing': lengths['spacing'],
+            'custom_edge_spacing': self.ui.custom_edge_spacing_checkbox.isChecked(),
+            'edge_spacing': self.ui.edge_spacing_input.value(),
+            'sheet_thickness': lengths['sheet_thickness'],
             'deflection': deflection_mm,
             'deflection_angle': deflection_angle,
             'simplification': self.ui.simplification_input.value(),
@@ -1002,38 +1072,8 @@ class NestingController:
         return settings_dict
 
     def save_settings(self, settings):
-        """Saves current UI settings to FreeCAD preferences."""
-        prefs = FreeCAD.ParamGet(PREFS_PATH)
-        prefs.SetFloat(PROP_SHEET_WIDTH, float(settings['sheet_width']))
-        prefs.SetFloat(PROP_SHEET_HEIGHT, float(settings['sheet_height']))
-        prefs.SetFloat(PROP_PART_SPACING, float(settings['spacing']))
-        prefs.SetFloat(PROP_SHEET_THICKNESS, float(settings['sheet_thickness']))
-        prefs.SetFloat(PROP_DEFLECTION_ANGLE, float(settings.get('deflection_angle', 10)))  # Save angle, not mm
-        prefs.SetFloat(PROP_SIMPLIFICATION, float(settings['simplification']))
-        prefs.SetFloat("GACompactnessWeight", float(settings['compactness_weight']))
-        
-        mink_steps = int(360 / self.ui.rotation_angles[self.ui.minkowski_rotation_steps_slider.value()])
-        prefs.SetInt("MinkowskiRotationSteps", mink_steps)
-        
-        phys_angles = PHYSICS_ROTATION_PRESETS
-        phys_steps = int(360 / phys_angles[self.ui.physics_rotation_steps_slider.value()])
-        prefs.SetInt("PhysicsRotationSteps", phys_steps)
-
-        prefs.SetBool(PROP_ADD_LABELS, bool(settings['add_labels']))
-        prefs.SetBool(PROP_SHOW_BOUNDS, bool(settings['show_bounds']))
-        prefs.SetFloat(PROP_LABEL_HEIGHT, float(settings['label_height']))
-        prefs.SetFloat(PROP_LABEL_SIZE, float(settings['label_size']))
-        prefs.SetFloat("PhysicsStabilityTolerance", float(settings.get('stability_tolerance', 0.01)))
-        prefs.SetString("PhysicsAnnealCurveType", str(settings.get('anneal_curve', "Logarithmic")))
-        prefs.SetFloat("PhysicsAnnealMinAmp", float(settings.get('anneal_min_amp', 0.1)))
-        prefs.SetFloat("PhysicsAnnealMaxAmp", float(settings.get('anneal_max_amp', 100.0)))
-        
-        prefs.SetInt("PhysicsAnnealRotSteps", int(settings.get('anneal_rot_steps', 10)))
-        prefs.SetString("PhysicsAnnealRotCurveType", str(settings.get('anneal_rot_curve', "Logarithmic")))
-        prefs.SetFloat("PhysicsAnnealRotMin", float(settings.get('anneal_rot_min', 1.0)))
-        prefs.SetFloat("PhysicsAnnealRotMax", float(settings.get('anneal_rot_max', 90.0)))
-        if settings['font_path']:
-             prefs.SetString("FontPath", str(settings['font_path']))
+        """Save the full panel, including fields unrelated to the selected algorithm."""
+        self.ui.save_persisted_settings()
 
     def _collect_job_parameters(self, ui_settings):
         quantities = {}
@@ -1055,7 +1095,10 @@ class NestingController:
                 up_dir_combo = self.ui.shape_table.cellWidget(row, 3)
                 up_direction = up_dir_combo.currentText() if up_dir_combo else "Z+"
                 
-                fill_checkbox = self.ui.shape_table.cellWidget(row, 4)
+                grain_combo = self.ui.shape_table.cellWidget(row, 4)
+                grain_direction = grain_combo.currentData() if grain_combo else "None"
+
+                fill_checkbox = self.ui.shape_table.cellWidget(row, 5)
                 fill_sheet = fill_checkbox.isChecked() if fill_checkbox else False
                 
                 quantities[label] = {
@@ -1068,6 +1111,7 @@ class NestingController:
                     'override_rotation': override,
                     'part_rotation_steps': rot_val,
                     'up_direction': up_direction,
+                    'grain_direction': grain_direction,
                     'fill_sheet': fill_sheet
                 }
                 
@@ -1075,7 +1119,15 @@ class NestingController:
             except Exception as e:
                 FreeCAD.Console.PrintWarning(f"[NestingController] Skipping row {row} in shape table: {e}\n")
                 continue
-            
+
+            # Invalid grain must abort the run, never silently skip a required
+            # part or remove its orientation constraint.
+            try:
+                grain_rotation_angles(up_direction, grain_direction,
+                                      ui_settings.get('sheet_grain_direction', 'None'))
+            except ValueError as exc:
+                raise ValueError(f"{label}: {exc}") from exc
+
         for obj in self.ui.selected_shapes_to_process:
              try:
                  lbl = obj.Label.replace("master_shape_", "")
@@ -1087,7 +1139,8 @@ class NestingController:
         return ui_settings, quantities, master_map, rotation_params
 
     def _prepare_algo_kwargs(self, ui_params):
-        algo_kwargs = {}
+        algo_kwargs = {'sheet_thickness': ui_params.get('sheet_thickness', 3.0),
+                       'edge_spacing': effective_edge_spacing(ui_params)}
         algorithm = ui_params.get('algorithm', 'Minkowski')
         
         if algorithm == 'Physics':

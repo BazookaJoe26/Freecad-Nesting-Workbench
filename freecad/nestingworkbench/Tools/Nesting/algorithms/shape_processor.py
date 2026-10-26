@@ -24,7 +24,7 @@ def _require_area(poly, obj, up_direction):
         )
 
 
-def get_2d_profile_from_obj(obj, up_direction="Z+", tessellation_quality=0.1, simplification=1.0, verbose=False):
+def get_2d_profile_from_obj(obj, up_direction="Z+", tessellation_quality=0.1, simplification=1.0, verbose=False, center=True):
     """
     Extracts a usable 2D profile from a FreeCAD object by projecting it onto the XY plane.
     This captures the full silhouette of the shape from the specified viewing direction.
@@ -49,24 +49,25 @@ def get_2d_profile_from_obj(obj, up_direction="Z+", tessellation_quality=0.1, si
         # Rotate the shape around its center
         # Tight geometric bounds also work for Compounds and trimmed surfaces
         bb = get_geometry_bounding_box(shape)
-        center = FreeCAD.Vector(
+        rotation_center = FreeCAD.Vector(
             (bb.XMin + bb.XMax) / 2,
             (bb.YMin + bb.YMax) / 2,
             (bb.ZMin + bb.ZMax) / 2
         )
-        placement = FreeCAD.Placement(FreeCAD.Vector(0, 0, 0), rotation, center)
+        placement = FreeCAD.Placement(FreeCAD.Vector(0, 0, 0), rotation, rotation_center)
         shape.transformShape(placement.Matrix)
         if verbose:
             FreeCAD.Console.PrintMessage(f"  -> Rotated shape for up_direction={up_direction}\n")
     
     # Always center the shape using bounding box center (for both rotated and non-rotated)
     bb = get_geometry_bounding_box(shape)
-    translation = FreeCAD.Vector(
-        -(bb.XMin + bb.XMax) / 2,
-        -(bb.YMin + bb.YMax) / 2,
-        -(bb.ZMin + bb.ZMax) / 2
-    )
-    shape.translate(translation)
+    if center:
+        translation = FreeCAD.Vector(
+            -(bb.XMin + bb.XMax) / 2,
+            -(bb.YMin + bb.YMax) / 2,
+            -(bb.ZMin + bb.ZMax) / 2
+        )
+        shape.translate(translation)
 
     # Special case for sketches - already 2D
     if obj.isDerivedFrom("Sketcher::SketchObject"):

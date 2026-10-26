@@ -12,6 +12,37 @@ except ImportError:
     FreeCAD = None
 
 from .constants import LAYOUT_PREFIX
+import math
+
+
+def create_sheet_shape(width, height, thickness=3.0):
+    """Solid stock centred on the nesting plane, from -thickness/2 to +thickness/2."""
+    import Part
+    thickness = float(thickness)
+    if not math.isfinite(thickness) or thickness <= 0:
+        raise ValueError("Sheet thickness must be a positive finite length.")
+    return Part.makeBox(float(width), float(height), thickness,
+                        FreeCAD.Vector(0, 0, -thickness / 2.0))
+
+
+def grain_rotation_angles(up_direction, grain_direction, sheet_grain_direction="None"):
+    """Align a source-coordinate grain axis after the same projection as Up Dir.
+
+    Grain is bidirectional, so exactly two in-plane angles, 180 degrees apart,
+    are legal. None on either the sheet or part uses ordinary rotation settings.
+    """
+    if sheet_grain_direction in (None, "None") or grain_direction in (None, "None"):
+        return None
+    axes = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}
+    if grain_direction not in axes or sheet_grain_direction not in ("X", "Y"):
+        raise ValueError("Grain direction must be X, Y or Z; sheet grain must be None, X or Y.")
+    projected = get_up_direction_rotation(up_direction).multVec(
+        FreeCAD.Vector(*axes[grain_direction]))
+    if math.hypot(projected.x, projected.y) < 1e-7:
+        raise ValueError("Grain Dir must be perpendicular to Up Dir.")
+    target = 0.0 if sheet_grain_direction == "X" else 90.0
+    base = round((target - math.degrees(math.atan2(projected.y, projected.x))) % 180.0, 8) % 180.0
+    return (base, base + 180.0)
 
 def get_geometry_bounding_box(shape):
     """Return tight bounds of the trimmed geometry, independent of display mesh.

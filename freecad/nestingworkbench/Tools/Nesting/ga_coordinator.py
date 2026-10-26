@@ -14,6 +14,8 @@ from ...datatypes.shape import Shape
 from .layout_manager import LayoutManager
 from .algorithms import genetic_utils
 from .ga_snapshot import UNPLACED_PENALTY_FACTOR
+from ...rotation_constraints import constrain_angle, rotation_angles
+from .cancellation import NestingCancelled, check_cancel
 
 ELITE_FRACTION_DIVISOR = 5      # top 1/5 of the population survives unchanged
 MIN_ELITE_COUNT = 2             # always keep a breeding pair
@@ -22,7 +24,7 @@ DEFAULT_IMMIGRANT_RATIO = 0.15  # fraction of each new generation seeded at rand
 POOL_POLL_SECONDS = 0.25        # how often a wait on workers re-checks for cancel
 POOL_STARTUP_TIMEOUT = 60.0     # a worker that has not answered by now never will
 
-def enumerate_nfp_jobs(parts):
+def enumerate_nfp_jobs(parts, cancel_callback=None):
     """Enumerates every NFP cache key the placement loop can request for
     these parts, as {cache_key: (rep_A, rep_B, relative_angle)}.
 
@@ -33,25 +35,27 @@ def enumerate_nfp_jobs(parts):
     """
     reps = {}
     for p in parts:
-        reps.setdefault(p.source_freecad_object.Label, p)
+        check_cancel(cancel_callback)
+        reps.setdefault(p.type_label, p)
 
     def angle_grid(part):
-        steps = max(1, getattr(part, 'rotation_steps', 1) or 1)
-        return [i * (360.0 / steps) for i in range(steps)]
+        return rotation_angles(part)
 
     jobs = {}
     for a in reps.values():
         for b in reps.values():
+            check_cancel(cancel_callback)
             rel_angles = set()
             for ang_a in angle_grid(a):
+                check_cancel(cancel_callback)
                 for ang_b in angle_grid(b):
                     rel = (ang_b - ang_a) % 360.0
                     if abs(rel - 360.0) < 1e-5:
                         rel = 0.0
                     rel_angles.add(round(rel, 4))
             for rel in rel_angles:
-                key = (a.source_freecad_object.Label,
-                       b.source_freecad_object.Label,
+                key = (a.type_label,
+                       b.type_label,
                        rel, b.spacing, b.deflection, b.simplification)
                 jobs.setdefault(key, (a, b, rel))
     return jobs
@@ -123,15 +127,18 @@ def wait_for_any(pending, cancel_callback, deadline=None):
         TimeoutError: deadline (a time.monotonic() value) passed first.
     """
     while True:
-        done, _ = wait(pending, timeout=POOL_POLL_SECONDS, return_when=FIRST_COMPLETED)
-        if done:
-            return done
         if cancel_callback():
             return None
+        done, _ = wait(pending, timeout=POOL_POLL_SECONDS, return_when=FIRST_COMPLETED)
+        if cancel_callback():
+            return None
+        if done:
+            return done
         if deadline is not None and time.monotonic() > deadline:
             raise TimeoutError
 
-def start_worker_pool(max_workers, cache_payload, cancel_callback):
+def start_worker_pool(max_workers, cache_payload, cancel_callback,
+                      part_catalog=None, geometry_payload=None):
     """Creates the GA worker pool and waits for a worker to answer.
 
     Workers start lazily, so a pool that cannot run - a worker that dies on
@@ -153,7 +160,7 @@ def start_worker_pool(max_workers, cache_payload, cancel_callback):
         max_workers=max_workers,
         mp_context=worker_mp_context(),
         initializer=init_worker,
-        initargs=(cache_payload,)
+        initargs=(cache_payload, part_catalog, geometry_payload)
     )
     try:
         probe = pool.submit(worker_ping)
@@ -229,6 +236,25 @@ class GACoordinator:
 
     def run(self, target_layout, ui_params, quantities, master_map,
             rotation_params, algo_kwargs, is_simulating, viz_manager=None):
+        try:
+            return self._run(target_layout, ui_params, quantities, master_map,
+                             rotation_params, algo_kwargs, is_simulating, viz_manager)
+        except NestingCancelled:
+            self._discard_workspace()
+            self._set_status("Nesting cancelled.")
+            return None
+        except Exception as error:
+            # Preparation and precomputation also own the shared document
+            # sandbox, before the generation loop's error handler is active.
+            import traceback
+            FreeCAD.Console.PrintError(f"GA Preparation Error: {error}\n{traceback.format_exc()}\n")
+            self._discard_workspace()
+            self._dispatch_recompute()
+            self._set_status(f"Error: {error}")
+            return None
+
+    def _run(self, target_layout, ui_params, quantities, master_map,
+             rotation_params, algo_kwargs, is_simulating, viz_manager=None):
         """
         Execute the GA optimization and return a NestingJob for the winner.
 
@@ -261,7 +287,11 @@ class GACoordinator:
         if verbose:
             FreeCAD.Console.PrintMessage(f"GA Mode: {generations} generations, {population_size} population\n")
         
-        self.layout_manager = LayoutManager(self.doc, self.shape_preparer.processed_shape_cache, rng=self.rng)
+        geometry_only = not is_simulating and ui_params.get('algorithm', 'Minkowski') == 'Minkowski'
+        self.layout_manager = LayoutManager(self.doc, self.shape_preparer.processed_shape_cache,
+                                            rng=self.rng, geometry_only=geometry_only,
+                                            cancel_callback=cancel_callback)
+        check_cancel(cancel_callback)
         
         self._set_status(f"Creating {population_size} layouts...")
         if self.draw_callback:
@@ -287,8 +317,9 @@ class GACoordinator:
                 master_map, quantities, ui_params, population_size, rotation_steps, verbose=verbose
             )
         
+        required_nfps = set()
         if layouts and layouts[0].parts:
-            self._precompute_all_nfps(layouts[0].parts, cancel_callback)
+            required_nfps = self._precompute_all_nfps(layouts[0].parts, cancel_callback)
 
         best_layout = None
         best_efficiency = 0
@@ -310,12 +341,15 @@ class GACoordinator:
         pool = None
         self._serial_fallback = False
         max_workers = min(os.cpu_count() or 1, population_size, 8)
-        if max_workers > 1 and not is_simulating:
+        if max_workers > 1 and geometry_only and not cancel_callback():
             self._set_status("Starting worker processes...")
             try:
                 with Shape.nfp_cache_lock:
-                    cache_payload = dict(Shape.nfp_cache)
-                pool = start_worker_pool(max_workers, cache_payload, cancel_callback)
+                    cache_payload = {key: Shape.nfp_cache[key] for key in required_nfps
+                                     if key in Shape.nfp_cache}
+                pool = start_worker_pool(max_workers, cache_payload, cancel_callback,
+                                         self.layout_manager.part_catalog,
+                                         self.layout_manager.geometry_payload)
             except Exception as e:
                 FreeCAD.Console.PrintWarning(
                     f"[GACoordinator] Worker processes failed to start ({e}); "
@@ -389,7 +423,7 @@ class GACoordinator:
                     actual_elite = min(elite_count, len(layouts))
                     elites = layouts[:actual_elite]
                     
-                    if self.draw_callback:
+                    if self.draw_callback and not geometry_only:
                         next_gen_payload = {
                             'build_next_generation': True,
                             'gen': gen,
@@ -412,7 +446,7 @@ class GACoordinator:
                         )
                 else:
                     # Final cleanup
-                    if self.draw_callback:
+                    if self.draw_callback and not geometry_only:
                          self.draw_callback({
                              'cleanup_layouts': True,
                              'layouts': layouts,
@@ -425,6 +459,16 @@ class GACoordinator:
                                 self.layout_manager.delete_layout(layout, verbose=verbose)
                     layouts = [best_layout]
             
+            check_cancel(cancel_callback)
+            if geometry_only:
+                if best_layout is not None:
+                    best_layout = self._dispatch_to_main_thread(
+                        'ga_materialize',
+                        lambda: self.layout_manager.materialize_layout(best_layout, ui_params),
+                        layout=best_layout, ui_params=ui_params)
+                else:
+                    self._discard_workspace()
+
             # Fill phase: generations nested regular parts only — fill the
             # winning layout exactly once (spawns still marshal to the main
             # thread via request_spawn).
@@ -434,6 +478,7 @@ class GACoordinator:
                     from .nesting_logic import fill_existing_sheets
                     self._set_status("Filling winning layout...")
                     fill_kwargs = algo_kwargs.copy()
+                    fill_kwargs['layout_offset'] = ui_params.get('layout_offset', (0, 0, 0))
                     fill_kwargs.pop('clear_nfp_cache', None)
                     fill_kwargs['rng'] = self.rng
                     fill_kwargs['spawn_more_callback'] = self.request_spawn
@@ -464,9 +509,15 @@ class GACoordinator:
                     best_efficiency = best_layout.efficiency
             
             # STEP 4: Finalize result — dispatch to main thread (ViewObject + recompute)
+            check_cancel(cancel_callback)
             job = self._dispatch_finalize(best_layout, best_efficiency, total_nesting_time, target_layout, ui_params)
             return job
 
+        except NestingCancelled:
+            self._cleanup_cancelled_layouts(layouts)
+            self._discard_workspace()
+            self._set_status("Nesting cancelled.")
+            return None
         except Exception as e:
             import traceback
             FreeCAD.Console.PrintError(f"GA Nesting Error: {e}\n{traceback.format_exc()}\n")
@@ -474,6 +525,7 @@ class GACoordinator:
             if 'layouts' in locals():
                 for layout in layouts:
                     self.layout_manager.delete_layout(layout)
+            self._discard_workspace()
             self._dispatch_recompute()
             return None
         finally:
@@ -500,6 +552,8 @@ class GACoordinator:
         payload = {payload_key: True, 'result_holder': result_holder}
         payload.update(kwargs)
         self.draw_callback(payload)
+        if '_error' in payload:
+            raise payload['_error']
         return result_holder[0]
 
     def _dispatch_finalize(self, best_layout, best_efficiency, total_time, target_layout, ui_params):
@@ -525,6 +579,24 @@ class GACoordinator:
         else:
             self.doc.recompute()
 
+    def _discard_workspace(self):
+        if self.layout_manager is None:
+            return
+        layouts = list(self.layout_manager.document_layouts)
+        template = self.layout_manager.document_layout
+        if template is not None and template not in layouts:
+            layouts.append(template)
+        if layouts:
+            self._cleanup_cancelled_layouts(layouts)
+
+    def _cleanup_cancelled_layouts(self, layouts):
+        """Document cleanup must still be acknowledged on the main thread."""
+        def cleanup():
+            for layout in layouts:
+                self.layout_manager.delete_layout(layout)
+        self._dispatch_to_main_thread('cleanup_layouts', cleanup,
+                                      layouts=layouts, best_layout=None)
+
     def request_spawn(self, spawn_fn):
         """Runs spawn_fn() on the main thread (it creates FreeCAD doc objects)
         and returns the new part. Used by the nester to mint fill-part
@@ -543,16 +615,16 @@ class GACoordinator:
         the generation loop starts. Runs on the GA worker thread; workers
         touch only Shapely geometry, so no main-thread marshaling is needed.
         Progress goes through the worker signals so the UI stays live."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor
         import os
         from .algorithms.minkowski_engine import compute_and_cache_nfp
 
-        jobs = enumerate_nfp_jobs(parts)
+        jobs = enumerate_nfp_jobs(parts, cancel_callback)
         with Shape.nfp_cache_lock:
             missing = {k: v for k, v in jobs.items() if k not in Shape.nfp_cache}
         total = len(missing)
         if not total:
-            return
+            return set(jobs)
 
         self._set_status(f"Precomputing {total} NFPs...")
         done = 0
@@ -561,23 +633,45 @@ class GACoordinator:
         # 24w 2.257s. Shapely/GEOS releases the GIL only briefly here, so
         # scaling peaks at 2 and decays from there. Do not raise this without
         # re-running the thread-scaling benchmark.
-        with ThreadPoolExecutor(max_workers=min(2, os.cpu_count() or 1)) as pool:
-            futures = [pool.submit(compute_and_cache_nfp, a, 0.0, b, rel, key)
-                       for key, (a, b, rel) in missing.items()]
-            for future in as_completed(futures):
-                if cancel_callback():
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    return
-                done += 1
+        max_workers = min(2, os.cpu_count() or 1)
+        # Keep only one job per worker in flight. Poll even when no NFP has
+        # finished, and let running geometry loops observe cancellation too.
+        pool = ThreadPoolExecutor(max_workers=max_workers)
+        pending = set()
+        remaining = iter(missing.items())
+        try:
+            while True:
+                check_cancel(cancel_callback)
+                while len(pending) < max_workers:
+                    job = next(remaining, None)
+                    if job is None:
+                        break
+                    key, (a, b, rel) = job
+                    pending.add(pool.submit(compute_and_cache_nfp, a, 0.0, b, rel, key,
+                                            cancel_callback=cancel_callback))
+                if not pending:
+                    break
+                finished = wait_for_any(pending, cancel_callback)
+                if finished is None:
+                    raise NestingCancelled()
+                pending -= finished
+                for future in finished:
+                    future.result()
+                    done += 1
                 self._update_progress(done, total, f"Precomputing NFPs {done}/{total}")
+        finally:
+            # Never leave cache-writing threads alive after a cancelled run.
+            # Their cooperative checkpoints stop them at the next geometry step.
+            pool.shutdown(wait=True, cancel_futures=True)
+        return set(jobs)
 
     def _run_generation(self, layouts, gen, generations, ui_params, rotation_steps, algo_kwargs,
                         is_simulating, cancel_callback, verbose, viz_manager=None, pool=None):
         """Nests each layout in the population and calculates fitness/efficiency."""
         total_time = 0
 
-        if pool is not None and not is_simulating:
-            from .ga_snapshot import snapshot_member, apply_result
+        if self.layout_manager.geometry_only or (pool is not None and not is_simulating):
+            from .ga_snapshot import snapshot_member, apply_result, nest_from_snapshot
             from .ga_worker import worker_nest
 
             self._in_parallel_generation = True
@@ -591,14 +685,15 @@ class GACoordinator:
                     if verbose:
                         FreeCAD.Console.PrintMessage(f"  [Gen {gen+1}] Layout {idx+1}/{len(layouts)}: {layout.name}\n")
 
-                    if layout.sheets: continue
+                    if layout.sheets or layout.result is not None: continue
                     if not layout.parts:
                         layout.fitness, layout.efficiency = float('inf'), 0
                         continue
 
                     member_idx = layout.member_idx
                     task = snapshot_member(layout, ui_params, gen, member_idx, getattr(self, 'seed', 0),
-                                           search_direction=algo_kwargs.get('search_direction', (0, -1)))
+                                           search_direction=algo_kwargs.get('search_direction', (0, -1)),
+                                           part_catalog=self.layout_manager.part_catalog)
                     tasks.append(task)
                     pending_layouts.append((member_idx, layout))
 
@@ -606,19 +701,43 @@ class GACoordinator:
                     # Cancel is seen within POOL_POLL_SECONDS; the caller then
                     # terminates the workers, so a long member does not hold
                     # the run open until it finishes.
-                    pending = {pool.submit(worker_nest, t) for t in tasks}
                     results = []
-                    while pending:
-                        done = wait_for_any(pending, cancel_callback)
-                        if done is None:
-                            return total_time, True
-                        pending -= done
-                        results.extend(fut.result() for fut in done)
+                    if pool is None:
+                        quiet = len(layouts) > 1 or generations > 1
+                        log_callback = algo_kwargs.get('log_callback')
+                        progress_callback = algo_kwargs.get('progress_callback')
+                        if self.draw_callback:
+                            log_callback = lambda msg: FreeCAD.Console.PrintMessage(f"{msg}\n")
+                            progress_callback = self._update_progress
+                        for task in tasks:
+                            if cancel_callback():
+                                return total_time, True
+                            results.append(nest_from_snapshot(
+                                task, self.layout_manager.part_catalog, self.layout_manager.geometries,
+                                self.layout_manager.rotation_cache, cancel_callback=cancel_callback,
+                                progress_callback=progress_callback, log_callback=log_callback, quiet=quiet))
+                            if cancel_callback():
+                                return total_time, True
+                    else:
+                        pending = {pool.submit(worker_nest, t) for t in tasks}
+                        while pending:
+                            done = wait_for_any(pending, cancel_callback)
+                            if done is None:
+                                return total_time, True
+                            pending -= done
+                            results.extend(fut.result() for fut in done)
                     results.sort(key=lambda r: r.member_idx)
                     layout_map = {m_idx: l for m_idx, l in pending_layouts}
                     for res in results:
                         layout = layout_map[res.member_idx]
-                        apply_result(layout, res, ui_params)
+                        if self.layout_manager.geometry_only:
+                            # Breeding needs genes and fitness, not reconstructed
+                            # placed polygons or FreeCAD placements for every loser.
+                            layout.result = res
+                            layout.fitness, layout.efficiency = res.fitness, res.efficiency
+                            layout.genes = list(res.genes)
+                        else:
+                            apply_result(layout, res, ui_params)
                         total_time += res.elapsed
 
                 return total_time, False
@@ -640,6 +759,7 @@ class GACoordinator:
             
             # Run nesting
             current_kwargs = algo_kwargs.copy()
+            current_kwargs['layout_offset'] = ui_params.get('layout_offset', (0, 0, 0))
             # Per-member stream: a member's draws must not depend on how many
             # draws earlier members made, or the run stops being reproducible
             # the moment members are reordered or run concurrently.
@@ -720,7 +840,7 @@ class GACoordinator:
             
         return total_time, False
 
-    def _diversify(self, genes, seen, mutation_rate, rotation_steps, attempts=4):
+    def _diversify(self, genes, seen, mutation_rate, rotation_steps, attempts=4, angle_options=None):
         """
         Returns a chromosome that is not already in `seen` (a set of gene
         tuples), and records it there.
@@ -738,11 +858,13 @@ class GACoordinator:
                 seen.add(tuple(genes))
                 return genes
             genes = genetic_utils.mutate_genes(
-                genes, min(1.0, mutation_rate * (attempt + 2)), rotation_steps, rng=self.rng)
+                genes, min(1.0, mutation_rate * (attempt + 2)), rotation_steps,
+                rng=self.rng, angle_options=angle_options)
         part_ids = [g[0] for g in genes]
         self.rng.shuffle(part_ids)
         step = 360.0 / rotation_steps if rotation_steps > 1 else 0.0
-        genes = [(pid, self.rng.randrange(rotation_steps) * step if rotation_steps > 1 else 0.0)
+        genes = [(pid, self.rng.choice(angle_options[pid]) if angle_options is not None
+                  else self.rng.randrange(rotation_steps) * step if rotation_steps > 1 else 0.0)
                  for pid in part_ids]
         seen.add(tuple(genes))
         return genes
@@ -753,6 +875,8 @@ class GACoordinator:
         from .algorithms import genetic_utils
         
         use_random_direction = ui_params.get('use_random_direction', False)
+        angle_options = {p.id: rotation_angles(p, rotation_steps)
+                         for p in elites[0].parts if not getattr(p, 'fill_sheet', False)}
         # Breed from the WHOLE evaluated population, not just the elites.
         # elite_count is max(2, pop // 5), so an elite-only pool holds exactly
         # two members at pop <= 10; rng.sample() then returns the entire pool
@@ -783,6 +907,7 @@ class GACoordinator:
         # we have measured; re-evaluating it costs a full nest() for nothing.
         seen = {tuple(elites[0].genes or ())}
         for i in range(n_offspring):
+            check_cancel(self.layout_manager.cancel_callback)
             # k must leave at least one pool member out, otherwise sample()
             # draws the whole pool and the "tournament" always returns its
             # fittest member.
@@ -798,8 +923,10 @@ class GACoordinator:
                 p1_genes, p1_dir = ranked_pool[0][1] if ranked_pool else ([], None)
                 child_genes = list(p1_genes)
                 parent_direction = p1_dir
-            child_genes = genetic_utils.mutate_genes(child_genes, mutation_rate, rotation_steps, rng=self.rng)
-            child_genes = self._diversify(child_genes, seen, mutation_rate, rotation_steps)
+            child_genes = genetic_utils.mutate_genes(
+                child_genes, mutation_rate, rotation_steps, rng=self.rng, angle_options=angle_options)
+            child_genes = self._diversify(
+                child_genes, seen, mutation_rate, rotation_steps, angle_options=angle_options)
             child_layout = self.layout_manager.create_layout(
                 f"Layout_GA_{gen+2}_c{i+1}", master_map, quantities, ui_params,
                 chromosome_ordering=child_genes, member_idx=next_member_idx
@@ -817,6 +944,7 @@ class GACoordinator:
             new_layouts.append(child_layout)
 
         for i in range(n_immigrants):
+            check_cancel(self.layout_manager.cancel_callback)
             imm = self.layout_manager.create_layout(
                 f"Layout_GA_{gen+2}_i{i+1}", master_map, quantities, ui_params,
                 member_idx=next_member_idx
@@ -831,16 +959,13 @@ class GACoordinator:
 
                 # Random rotations for regular parts only — fill parts keep their
                 # full rotation sweep and never get a gene_angle pin
-                if rotation_steps > 1:
-                    for part in regular:
-                        angle = self.rng.randrange(rotation_steps) * (360.0 / rotation_steps)
-                        part.set_rotation(angle)
-                        part.gene_angle = angle
-                else:
-                    for part in regular:
-                        part.gene_angle = 0.0
+                for part in regular:
+                    angle = self.rng.choice(rotation_angles(part, rotation_steps))
+                    part.set_rotation(angle)
+                    part.gene_angle = angle
                 imm.genes = [(p.id, getattr(p, '_angle', 0)) for p in regular]
-                diversified = self._diversify(imm.genes, seen, mutation_rate, rotation_steps)
+                diversified = self._diversify(
+                    imm.genes, seen, mutation_rate, rotation_steps, angle_options=angle_options)
                 if diversified != imm.genes:
                     # The shuffle collided with a chromosome already queued for
                     # this generation; _diversify reshuffled it, so re-sync the
@@ -852,11 +977,12 @@ class GACoordinator:
                         part = by_id.get(part_id)
                         if part is None:
                             continue
+                        angle = constrain_angle(part, angle)
                         part.set_rotation(angle)
                         part.gene_angle = angle
                         regular.append(part)
                     imm.parts = regular + fill
-                    imm.genes = diversified
+                    imm.genes = [(p.id, p.angle) for p in regular]
 
                 # Immigrants get a fresh random direction if enabled
                 if use_random_direction:
@@ -876,8 +1002,10 @@ class GACoordinator:
             best_layout.layout_group.ViewObject.Visibility = True
         
         for sheet in best_layout.sheets:
+            self.layout_manager._check_cancel()
             sheet.draw(self.doc, ui_params, best_layout.layout_group,
-                       parts_to_place_group=best_layout.parts_group)
+                       parts_to_place_group=best_layout.parts_group,
+                       cancel_callback=self.layout_manager._check_cancel)
 
         if best_layout.layout_group and hasattr(best_layout.layout_group, "Group"):
             for child in best_layout.layout_group.Group:

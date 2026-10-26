@@ -5,15 +5,18 @@ import Part
 import copy
 import Draft
 import traceback
+from types import SimpleNamespace
 from .algorithms import shape_processor
+from .cancellation import check_cancel
 from ...datatypes.shape_object import create_shape_object
 from ...datatypes.shape import Shape
 from ...freecad_helpers import (
     get_up_direction_rotation, create_part_feature, get_geometry_bounding_box,
+    grain_rotation_angles,
 )
 from ...constants import (
     PROP_BOOL, PROP_INTEGER, PROP_STRING,
-    PROP_QUANTITY, PROP_UP_DIRECTION, PROP_FILL_SHEET,
+    PROP_QUANTITY, PROP_UP_DIRECTION, PROP_FILL_SHEET, PROP_GRAIN_DIRECTION,
     PROP_PART_ROTATION_OVERRIDE, PROP_PART_ROTATION_STEPS,
 )
 
@@ -41,6 +44,8 @@ def write_master_metadata(container, part_params):
          int(part_params.get('quantity', 1))),
         (PROP_STRING, PROP_UP_DIRECTION, "Up direction for 2D projection",
          str(part_params.get('up_direction', 'Z+'))),
+        (PROP_STRING, PROP_GRAIN_DIRECTION, "Source grain axis, or None for unrestricted rotation",
+         str(part_params.get('grain_direction', 'None'))),
         (PROP_BOOL, PROP_FILL_SHEET, "Use to fill remaining space",
          bool(part_params.get('fill_sheet', False))),
         (PROP_BOOL, PROP_PART_ROTATION_OVERRIDE,
@@ -63,9 +68,10 @@ class ShapePreparer:
     - Manages the 'MasterShapes' group.
     - Creates the temporary Shape instances used by the algorithm.
     """
-    def __init__(self, doc, processed_shape_cache):
+    def __init__(self, doc, processed_shape_cache, cancel_callback=None):
         self.doc = doc
         self.processed_shape_cache = processed_shape_cache
+        self.cancel_callback = cancel_callback
 
     def prepare_parts(self, ui_global_settings, quantities, master_shapes_map, layout_obj, parts_group):
         """
@@ -93,6 +99,7 @@ class ShapePreparer:
         masters_to_place = []
 
         for label, master_obj in master_shapes_map.items():
+            check_cancel(self.cancel_callback)
             try:
                 # Get up_direction for cache key
                 part_params = quantities.get(label, {'up_direction': 'Z+'})
@@ -244,6 +251,15 @@ class ShapePreparer:
                     # makes compute_and_cache_nfp raise on `mA.centroid` and
                     # cache an error for every pair key (issue #19).
                     temp_shape_wrapper.original_polygon = final_poly
+                    # The saved master is already aligned and centred on the
+                    # buffered pivot. Recover material geometry without moving
+                    # it or applying its placement a second time.
+                    profile_source = SimpleNamespace(
+                        Shape=temp_master_obj.Shape, Placement=FreeCAD.Placement(),
+                        Label=temp_master_obj.Label, isDerivedFrom=temp_master_obj.isDerivedFrom)
+                    temp_shape_wrapper.unbuffered_polygon = shape_processor.get_2d_profile_from_obj(
+                        profile_source, tessellation_quality=deflection,
+                        simplification=simplification, center=False)
                     temp_shape_wrapper.spacing = spacing
                     temp_shape_wrapper.deflection = float(deflection)
                     temp_shape_wrapper.simplification = float(simplification)
@@ -459,7 +475,7 @@ class ShapePreparer:
 
         def _spawn_factory(original_obj, master_wrapper, lookup_label,
                            part_rotation_steps, fill_sheet, up_direction,
-                           master_shape_obj, master_container):
+                           master_shape_obj, master_container, grain_angles):
             """Binds one part type's parameters into a dedicated closure scope.
 
             make_instance is handed out as spawn_next and called long after the
@@ -470,6 +486,7 @@ class ShapePreparer:
             next_instance_num = [0]
 
             def make_instance(as_fill=fill_sheet):
+                check_cancel(self.cancel_callback)
                 next_instance_num[0] += 1
                 i = next_instance_num[0]
 
@@ -488,6 +505,9 @@ class ShapePreparer:
                 shape_instance.rotation_steps = part_rotation_steps
                 shape_instance.fill_sheet = as_fill
                 shape_instance.up_direction = up_direction
+                shape_instance.grain_angles = grain_angles
+                if grain_angles is not None:
+                    shape_instance.set_rotation(grain_angles[0], reposition=False)
                 # The simulation highlighter needs the row this instance came
                 # from; it must never go looking for it by label (see
                 # nesting_logic._find_master_container_for_part).
@@ -526,6 +546,7 @@ class ShapePreparer:
             return make_instance
 
         for label, original_obj in master_shapes_map.items():
+            check_cancel(self.cancel_callback)
             # If reloading, label is master_shape_X, handle mapping
             lookup_label = label
             if label.startswith("master_shape_"):
@@ -536,6 +557,9 @@ class ShapePreparer:
             part_rotation_steps = part_params.get('rotation_steps', global_rotation_steps)
             fill_sheet = part_params.get('fill_sheet', False)
             up_direction = part_params.get('up_direction', 'Z+')
+            grain_angles = grain_rotation_angles(
+                up_direction, part_params.get('grain_direction', 'None'),
+                ui_settings.get('sheet_grain_direction', 'None'))
             
             master_shape_obj = master_shape_obj_map.get(id(original_obj))
             master_wrapper = master_geometry_cache.get(id(original_obj))
@@ -547,7 +571,7 @@ class ShapePreparer:
 
             make_instance = _spawn_factory(
                 original_obj, master_wrapper, lookup_label, part_rotation_steps,
-                fill_sheet, up_direction, master_shape_obj, master_container
+                fill_sheet, up_direction, master_shape_obj, master_container, grain_angles
             )
             # The quantity is a requirement even when Fill is on: those copies
             # are regular parts the GA arranges with everything else. Fill only

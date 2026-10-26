@@ -2,6 +2,7 @@
 import FreeCAD
 from ...freecad_helpers import recursive_delete
 from ...constants import *
+from ...layout_offsets import apply_layout_offsets
 
 class NestingJob:
     """
@@ -76,6 +77,7 @@ class NestingJob:
         self.cleanup()
         
         self._apply_properties(self.target_layout)
+        apply_layout_offsets(self.target_layout, self.params)
         
         return self.target_layout
 
@@ -92,10 +94,19 @@ class NestingJob:
 
     def _apply_properties(self, target_layout):
         p = self.params
-        self._set_prop(target_layout, PROP_LENGTH, PROP_SHEET_WIDTH, p['sheet_width'])
-        self._set_prop(target_layout, PROP_LENGTH, PROP_SHEET_HEIGHT, p['sheet_height'])
-        self._set_prop(target_layout, PROP_LENGTH, PROP_PART_SPACING, p['spacing'])
-        self._set_prop(target_layout, PROP_LENGTH, PROP_SHEET_THICKNESS, p['sheet_thickness'])
+        self._set_prop(target_layout, PROP_STRING, PROP_SHEET_GRAIN_DIRECTION,
+                       p.get('sheet_grain_direction', 'None'))
+        self._set_prop(target_layout, PROP_BOOL, PROP_CUSTOM_EDGE_SPACING, p.get('custom_edge_spacing', False))
+        self._set_prop(target_layout, PROP_LENGTH, PROP_EDGE_SPACING, p.get('edge_spacing', 0.0))
+        # Keep the dimensions used to generate this layout as a numeric snapshot.
+        # Formula sources are restored for the next nesting run; changing them
+        # requires packing again, not just changing export/CAM stock metadata.
+        for prop, key in SHEET_LENGTH_FIELDS.values():
+            if hasattr(target_layout, prop):
+                target_layout.setExpression(prop, None)
+            self._set_prop(target_layout, PROP_LENGTH, prop, p[key])
+            self._set_prop(target_layout, PROP_STRING, prop + "Expression",
+                           p.get('length_expressions', {}).get(prop, ''))
         self._set_prop(target_layout, PROP_FLOAT, PROP_DEFLECTION_ANGLE, p.get('deflection_angle', 30))
         self._set_prop(target_layout, PROP_FLOAT, PROP_SIMPLIFICATION, p.get('simplification', 1.0))
         self._set_prop(target_layout, PROP_FILE, PROP_FONT_FILE, p['font_path'])

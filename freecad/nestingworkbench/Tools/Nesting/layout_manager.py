@@ -15,9 +15,12 @@ import FreeCAD
 import copy
 import random
 import math
+import time
 from .shape_preparer import ShapePreparer
 from ...datatypes.shape import Shape
 from ...freecad_helpers import recursive_delete
+from ...rotation_constraints import constrain_angle, rotation_angles
+from .cancellation import check_cancel
 from .algorithms.genetic_utils import (
     largest_open_area,
     compute_layout_fitness,
@@ -47,10 +50,11 @@ class Layout:
         self.efficiency = 0.0
         self.genes = []                   # (part_id, angle) tuples - the "DNA" of this layout
         self.direction = None             # (dx, dy) unit vector; None = use global search_direction
+        self.result = None                # compact result for a geometry-only candidate
     
     @property
     def name(self):
-        return self.layout_group.Label if self.layout_group else "unknown"
+        return self.layout_group.Label if self.layout_group else getattr(self, '_name', 'unknown')
 
 class LayoutManager:
     """
@@ -58,14 +62,86 @@ class LayoutManager:
     Acts as a factory for Layout objects used in nesting.
     """
     
-    def __init__(self, doc, processed_shape_cache=None, rng=None):
+    def __init__(self, doc, processed_shape_cache=None, rng=None, geometry_only=False, cancel_callback=None):
         self.doc = doc
         self.processed_shape_cache = processed_shape_cache or {}
         self._layout_counter = 0
         self.rng = rng or random
+        self.geometry_only = geometry_only
+        self.document_layout = None
+        self.document_layouts = []
+        self.cancel_callback = cancel_callback
+        self._last_gui_poll = 0.0
+        self.part_catalog = None
+        self.geometry_payload = None
+        self.geometries = None
+        from .algorithms.rotation_cache import RotationCache
+        self.rotation_cache = RotationCache()
+
+    def _check_cancel(self):
+        check_cancel(self.cancel_callback)
+        # Preparation runs on the GUI thread. Yield between complete objects
+        # so a queued Cancel click can actually set the cancellation flag.
+        if self.cancel_callback is not None and FreeCAD.GuiUp:
+            from PySide import QtCore
+            app = QtCore.QCoreApplication.instance()
+            now = time.monotonic()
+            if app and QtCore.QThread.currentThread() == app.thread() and now - self._last_gui_poll >= 0.05:
+                self._last_gui_poll = now
+                app.processEvents(QtCore.QEventLoop.AllEvents, 5)
+        check_cancel(self.cancel_callback)
     
     def create_layout(self, name, master_shapes_map, quantities, ui_params, 
                       chromosome_ordering=None, member_idx: int = 0) -> Layout:
+        self._check_cancel()
+        if not self.geometry_only:
+            return self._create_document_layout(name, master_shapes_map, quantities, ui_params,
+                                                chromosome_ordering, member_idx)
+
+        from .ga_snapshot import SnapshotShape, build_part_catalog
+        if self.document_layout is None:
+            # One document sandbox supplies master geometry, fill spawners and
+            # the final winner's objects. No candidate owns document objects.
+            self.document_layout = self._create_document_layout(
+                'Layout_GA_Workspace', master_shapes_map, quantities, ui_params)
+            self.part_catalog, self.geometry_payload = build_part_catalog(self.document_layout.parts)
+            self.geometries = {self.part_catalog[p.id].geometry_key: p.original_polygon
+                               for p in self.document_layout.parts}
+            self.geometries.update({self.part_catalog[p.id].unbuffered_geometry_key: p.unbuffered_polygon
+                                    for p in self.document_layout.parts
+                                    if self.part_catalog[p.id].unbuffered_geometry_key is not None})
+
+        parts = []
+        for snap in self.part_catalog.values():
+            self._check_cancel()
+            parts.append(SnapshotShape(snap, self.geometries, self.rotation_cache))
+        if chromosome_ordering:
+            parts = self._apply_ordering(parts, chromosome_ordering)
+        layout = Layout(None, None, parts)
+        layout._name = name
+        layout.member_idx = member_idx
+        if chromosome_ordering:
+            layout.genes = [(p.id, p.angle) for p in parts if not p.fill_sheet]
+        return layout
+
+    def materialize_layout(self, layout, ui_params):
+        """Attach the winning geometry result to the single document sandbox.
+
+        Must run on the main thread, before fill placement or drawing.
+        """
+        if not self.geometry_only or layout is None:
+            return layout
+        from .ga_snapshot import apply_result
+        if layout.result is None:
+            raise ValueError('Cannot materialize an unevaluated GA candidate')
+        target = self.document_layout
+        apply_result(target, layout.result, ui_params, cancel_callback=self._check_cancel)
+        target.direction = layout.direction
+        target.member_idx = layout.member_idx
+        return target
+
+    def _create_document_layout(self, name, master_shapes_map, quantities, ui_params,
+                                chromosome_ordering=None, member_idx=0):
         """
         Creates a new layout with master shapes and part instances.
         
@@ -91,13 +167,17 @@ class LayoutManager:
         layout_group.addObject(parts_group)
         
         # Create shape preparer for this layout
-        preparer = ShapePreparer(self.doc, self.processed_shape_cache)
+        preparer = ShapePreparer(self.doc, self.processed_shape_cache, cancel_callback=self._check_cancel)
         
         # Prepare parts (creates masters and instances)
-        parts = preparer.prepare_parts(
-            ui_params, quantities, master_shapes_map, 
-            layout_group, parts_group
-        )
+        try:
+            parts = preparer.prepare_parts(
+                ui_params, quantities, master_shapes_map,
+                layout_group, parts_group
+            )
+        except Exception:
+            recursive_delete(self.doc, layout_group)
+            raise
         
         # Get master shapes group
         master_shapes_group = None
@@ -113,6 +193,7 @@ class LayoutManager:
         self._layout_counter += 1
         
         layout = Layout(layout_group, parts_group, parts, master_shapes_group)
+        self.document_layouts.append(layout)
         layout.member_idx = member_idx
         if chromosome_ordering and parts:
             # Genotype drives nesting: only genes for parts that actually exist,
@@ -140,9 +221,11 @@ class LayoutManager:
         
         ordered_parts = []
         for part_id, angle in chromosome_ordering:
+            self._check_cancel()
             if part_id in parts_map:
                 part = parts_map[part_id]
                 if angle is not None:
+                    angle = constrain_angle(part, angle)
                     part.set_rotation(angle)
                     part.gene_angle = angle
                 ordered_parts.append(part)
@@ -182,6 +265,8 @@ class LayoutManager:
         
         # Mark as deleted immediately to prevent re-entry
         layout._deleted = True
+        if layout in self.document_layouts:
+            self.document_layouts.remove(layout)
         layout.layout_group = None
         layout.sheets = []
         layout.parts = []
@@ -236,6 +321,7 @@ class LayoutManager:
         population = []
         
         for i in range(population_size):
+            self._check_cancel()
             name = f"Layout_GA_{i+1}"
             
             # Create the layout
@@ -251,14 +337,10 @@ class LayoutManager:
 
                 # Apply random rotations (regular parts only — fill parts keep
                 # their full rotation sweep and never get a gene_angle pin)
-                if rotation_steps > 1:
-                    for part in regular:
-                        angle = self.rng.randrange(rotation_steps) * (360.0 / rotation_steps)
-                        part.set_rotation(angle)
-                        part.gene_angle = angle
-                else:
-                    for part in regular:
-                        part.gene_angle = 0.0
+                for part in regular:
+                    angle = self.rng.choice(rotation_angles(part, rotation_steps))
+                    part.set_rotation(angle)
+                    part.gene_angle = angle
 
                 # Record genotype so nest() runs with sort=False and this ordering survives
                 layout.genes = [(p.id, getattr(p, '_angle', 0)) for p in regular]

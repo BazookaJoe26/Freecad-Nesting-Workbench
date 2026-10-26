@@ -29,20 +29,23 @@ except ImportError:
     Draft = None
 
 from .label_object import create_label_object
-from ..freecad_helpers import calculate_label_placement, create_part_feature, recursive_delete
+from ..freecad_helpers import calculate_label_placement, create_part_feature, recursive_delete, create_sheet_shape
+from ..Tools.Nesting.cancellation import check_cancel
+from ..edge_spacing import part_edge_bounds
 
 class Sheet:
     """
     Represents a single sheet (or bin) in the nesting layout. It contains
     the parts that have been placed on it.
     """
-    def __init__(self, sheet_id, width, height, spacing=0):
+    def __init__(self, sheet_id, width, height, spacing=0, edge_spacing=0):
         self.id = sheet_id
         self.width = width
         self.height = height
         self.used_area = 0.0 # Track area usage for fast filtering
         self.parts = [] # List of PlacedPart objects
         self.spacing = spacing
+        self.edge_spacing = max(0.0, float(edge_spacing))
         self.parent_group_name = None # Will store the name of the top-level layout group
 
     def __repr__(self):
@@ -87,8 +90,10 @@ class Sheet:
         if not SHAPELY_AVAILABLE: return False
         if not shape_to_check.polygon: return False
 
-        bin_polygon = Polygon([(0, 0), (self.width, 0), (self.width, self.height), (0, self.height)])
-        if not bin_polygon.contains(shape_to_check.polygon):
+        x0, y0, x1, y1 = part_edge_bounds(shape_to_check)
+        edge = self.edge_spacing
+        if (x0 < edge - 1e-7 or y0 < edge - 1e-7
+                or x1 > self.width - edge + 1e-7 or y1 > self.height - edge + 1e-7):
             return False
 
         for placed_part in self.parts:
@@ -98,7 +103,7 @@ class Sheet:
         
         return True
 
-    def draw(self, doc, ui_params, parent_group=None, transient_part=None, parts_to_place_group=None, x_offset=0, verbose=False):
+    def draw(self, doc, ui_params, parent_group=None, transient_part=None, parts_to_place_group=None, x_offset=0, verbose=False, cancel_callback=None):
         """
         Draws the sheet and its contents into the FreeCAD document.
 
@@ -115,6 +120,8 @@ class Sheet:
         """
         # verbose is passed as an argument
         sheet_origin = self.get_origin()
+        layout_offset = FreeCAD.Vector(*ui_params.get('layout_offset', (0, 0, 0)))
+        sheet_origin += layout_offset
         # Apply X offset for GA layout visualization
         if x_offset != 0:
             sheet_origin = FreeCAD.Vector(sheet_origin.x + x_offset, sheet_origin.y, sheet_origin.z)
@@ -150,30 +157,44 @@ class Sheet:
             
             sheet_group.addObject(shapes_group)
 
-            # Draw sheet boundary - always create a new one (FreeCAD will auto-rename if collision)
+            # The former plane stays at the stock's mid-plane; material extends
+            # equally above and below it without changing nesting coordinates.
             sheet_boundary_name = f"Sheet_Boundary_{self.id+1}"
             sheet_obj = create_part_feature(
-                doc, sheet_boundary_name, Part.makePlane(self.width, self.height), group=sheet_group, visible=True
+                doc, sheet_boundary_name,
+                create_sheet_shape(self.width, self.height, ui_params.get('sheet_thickness', 3.0)),
+                group=sheet_group, visible=True
             )
             sheet_obj.Placement = FreeCAD.Placement(sheet_origin, FreeCAD.Rotation())
             if FreeCAD.GuiUp and hasattr(sheet_obj, "ViewObject") and sheet_obj.ViewObject:
                 sheet_obj.ViewObject.Transparency = 75
+                sheet_obj.ViewObject.DisplayMode = "Flat Lines"
 
             # Draw the parts placed on this sheet
             for placed_part in self.parts:
+                check_cancel(cancel_callback)
                 self._draw_single_part(doc, placed_part.shape, sheet_origin, ui_params, shapes_group, parts_to_place_group, verbose=verbose)
 
         elif transient_part:
             # Draw/update sheet boundary during simulation
             sim_boundary_name = f"sim_sheet_boundary_{self.id}"
             sim_boundary = doc.getObject(sim_boundary_name)
+            thickness = float(ui_params.get('sheet_thickness', 3.0))
             if not sim_boundary:
                 sim_boundary = create_part_feature(
-                    doc, sim_boundary_name, Part.makePlane(self.width, self.height), visible=True
+                    doc, sim_boundary_name, create_sheet_shape(self.width, self.height, thickness), visible=True
                 )
                 if FreeCAD.GuiUp and hasattr(sim_boundary, "ViewObject") and sim_boundary.ViewObject:
                     sim_boundary.ViewObject.Transparency = 75
                     sim_boundary.ViewObject.DisplayMode = "Flat Lines"
+            else:
+                bounds = sim_boundary.Shape.BoundBox
+                if (not sim_boundary.Shape.Solids
+                        or abs(bounds.XLength - self.width) > 1e-7
+                        or abs(bounds.YLength - self.height) > 1e-7
+                        or abs(bounds.ZLength - thickness) > 1e-7
+                        or abs(bounds.Center.z - sim_boundary.Placement.Base.z) > 1e-7):
+                    sim_boundary.Shape = create_sheet_shape(self.width, self.height, thickness)
             sim_boundary.Placement = FreeCAD.Placement(sheet_origin, FreeCAD.Rotation())
             if FreeCAD.GuiUp and hasattr(sim_boundary, "ViewObject"):
                 sim_boundary.ViewObject.Visibility = True
@@ -192,6 +213,9 @@ class Sheet:
 
         # For final drawing, placement is pre-calculated. For simulation, we calculate it now.
         final_placement = shape.placement if shape.placement else shape.get_final_placement(sheet_origin)
+        if shape.placement:
+            final_placement = final_placement.copy()
+            final_placement.Base += FreeCAD.Vector(*ui_params.get('layout_offset', (0, 0, 0)))
 
         shape_obj = shape.fc_object
         if not shape_obj:

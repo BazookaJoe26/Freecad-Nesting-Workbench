@@ -12,6 +12,10 @@ import FreeCADGui
 import os
 from ...constants import *
 from ... import FONTS_DIR, DEFAULT_FONT
+from ...offset_input import LengthInput, OffsetInput
+from ...panel_preferences import (
+    load_panel_settings, save_panel_settings, connect_panel_settings, save_part_settings,
+)
 from freecad.nestingworkbench.ui_helpers import (
     show_info_dialog,
     MARGINS_NONE,
@@ -21,7 +25,6 @@ from freecad.nestingworkbench.ui_helpers import (
     make_checkbox,
     LinkedSliderSpinBox,
     CollapsibleSection,
-    closest_angle_index,
 )
 
 _MINKOWSKI_DIR_MAX = 359
@@ -109,11 +112,13 @@ class NestingPanel(QtWidgets.QWidget):
         self.selected_font_path = ""
         self.rotation_angles = _DEFAULTS["rotation_angles"]
         self._setup_ui()
-        self.set_default_font()
     
     def accept(self):
         """Called when the user clicks Standard Button OK / Apply."""
         if hasattr(self, 'controller'):
+            if self.controller.is_running:
+                return False
+            self.save_persisted_settings()
             self.controller.finalize_job()
             self.controller.on_panel_closed()
         return True
@@ -121,6 +126,10 @@ class NestingPanel(QtWidgets.QWidget):
     def reject(self):
         """Called when the user clicks Standard Button Cancel / Close."""
         if hasattr(self, 'controller'):
+            if self.controller.is_running:
+                self.controller.request_cancel()
+                return False
+            self.save_persisted_settings()
             self.controller.cancel_job()
             self.controller.on_panel_closed()
             
@@ -171,18 +180,38 @@ class NestingPanel(QtWidgets.QWidget):
         group = QtWidgets.QGroupBox(QT_TRANSLATE_NOOP("NestingPanel", "Sheet Setup"))
         form_layout = QtWidgets.QFormLayout()
 
-        self.sheet_width_input = make_double_spinbox(
-            _DEFAULTS["sheet_width"], 1, 10000
+        self.sheet_width_input = LengthInput(
+            FreeCAD.ActiveDocument, PROP_SHEET_WIDTH, self,
+            value=_DEFAULTS["sheet_width"], minimum=1, maximum=10000, label="Sheet Width"
         )
-        self.sheet_height_input = make_double_spinbox(
-            _DEFAULTS["sheet_height"], 1, 10000
+        self.sheet_height_input = LengthInput(
+            FreeCAD.ActiveDocument, PROP_SHEET_HEIGHT, self,
+            value=_DEFAULTS["sheet_height"], minimum=1, maximum=10000, label="Sheet Height"
         )
-        self.sheet_thickness_input = make_double_spinbox(
-            _DEFAULTS["sheet_thickness"], 0.1, 1000
+        self.sheet_thickness_input = LengthInput(
+            FreeCAD.ActiveDocument, PROP_SHEET_THICKNESS, self,
+            value=_DEFAULTS["sheet_thickness"], minimum=0.1, maximum=1000, label="Sheet Thickness"
         )
-        self.part_spacing_input = make_double_spinbox(
-            _DEFAULTS["part_spacing"], 0, 1000
+        self.part_spacing_input = LengthInput(
+            FreeCAD.ActiveDocument, PROP_PART_SPACING, self,
+            value=_DEFAULTS["part_spacing"], minimum=0, maximum=1000, label="Part Spacing"
         )
+        self.custom_edge_spacing_checkbox = make_checkbox(
+            QT_TRANSLATE_NOOP("NestingPanel", "Custom Edge Spacing"),
+            tooltip=QT_TRANSLATE_NOOP("NestingPanel", "Set a separate distance between parts and sheet edges. Unchecked means no edge spacing.")
+        )
+        self.edge_spacing_input = make_double_spinbox(
+            0.0, 0, 1000,
+            tooltip=QT_TRANSLATE_NOOP("NestingPanel", "Minimum distance from the actual part outline to each sheet edge, independent of Part Spacing.")
+        )
+        self.edge_spacing_input.setEnabled(False)
+        self.custom_edge_spacing_checkbox.toggled.connect(self.edge_spacing_input.setEnabled)
+        self.sheet_grain_direction_combo = QtWidgets.QComboBox()
+        self.sheet_grain_direction_combo.addItems(["None", "X", "Y"])
+        self.sheet_grain_direction_combo.setToolTip(QT_TRANSLATE_NOOP(
+            "NestingPanel", "Optional material grain along sheet X (width) or Y (height). "
+            "None disables grain constraints for all parts and uses normal rotation settings."
+        ))
 
         self.deflection_input = make_double_spinbox(
             _DEFAULTS["deflection_angle"], 1, 90,
@@ -213,7 +242,28 @@ class NestingPanel(QtWidgets.QWidget):
         form_layout.addRow(QT_TRANSLATE_NOOP("NestingPanel", "Sheet Width:"), self.sheet_width_input)
         form_layout.addRow(QT_TRANSLATE_NOOP("NestingPanel", "Sheet Height:"), self.sheet_height_input)
         form_layout.addRow(QT_TRANSLATE_NOOP("NestingPanel", "Sheet Thickness:"), self.sheet_thickness_input)
+        form_layout.addRow(QT_TRANSLATE_NOOP("NestingPanel", "Sheet Grain Direction:"), self.sheet_grain_direction_combo)
         form_layout.addRow(QT_TRANSLATE_NOOP("NestingPanel", "Part Spacing:"), self.part_spacing_input)
+        edge_spacing_layout = QtWidgets.QHBoxLayout()
+        edge_spacing_layout.addWidget(self.custom_edge_spacing_checkbox)
+        edge_spacing_layout.addWidget(self.edge_spacing_input)
+        form_layout.addRow(edge_spacing_layout)
+
+        offset_labels = (
+            QT_TRANSLATE_NOOP("NestingPanel", "X Offset:"),
+            QT_TRANSLATE_NOOP("NestingPanel", "Y Offset:"),
+            QT_TRANSLATE_NOOP("NestingPanel", "Z Offset:"),
+        )
+        for axis, label in zip("xyz", offset_labels):
+            field = OffsetInput(FreeCAD.ActiveDocument, "Offset" + axis.upper(), self)
+            field.setToolTip(QT_TRANSLATE_NOOP(
+                "NestingPanel",
+                "Moves the complete layout, including sheets, parts and labels. "
+                "Enter a length. Click fx to use a FreeCAD expression, "
+                "e.g. Spreadsheet.OffsetX or Spreadsheet.OffsetX + 5 mm."
+            ))
+            setattr(self, f"offset_{axis}_input", field)
+            form_layout.addRow(label, field)
 
         curve_settings_layout = QtWidgets.QHBoxLayout()
         curve_settings_layout.addWidget(QtWidgets.QLabel(QT_TRANSLATE_NOOP("NestingPanel", "Curve:")))
@@ -578,12 +628,13 @@ class NestingPanel(QtWidgets.QWidget):
     def _build_parts_table_and_buttons(self, main_layout):
         """Builds the parts table and Add/Remove buttons."""
         self.shape_table = QtWidgets.QTableWidget()
-        self.shape_table.setColumnCount(5)
+        self.shape_table.setColumnCount(6)
         self.shape_table.setHorizontalHeaderLabels([
             QT_TRANSLATE_NOOP("NestingPanel", "Shape"),
             QT_TRANSLATE_NOOP("NestingPanel", "Quantity"),
             QT_TRANSLATE_NOOP("NestingPanel", "Rotations"),
             QT_TRANSLATE_NOOP("NestingPanel", "Up Dir"),
+            QT_TRANSLATE_NOOP("NestingPanel", "Grain Dir"),
             QT_TRANSLATE_NOOP("NestingPanel", "Fill"),
         ])
 
@@ -681,9 +732,10 @@ class NestingPanel(QtWidgets.QWidget):
         self.load_persisted_settings()
         self._update_rotation_label()
         self.controller.load_selection()
+        connect_panel_settings(self, self.save_persisted_settings)
 
     def add_part_row(self, row_index, label, quantity=1, rotation_steps=4, override_rotation=False, 
-                       up_direction="Z+", fill_sheet=False):
+                       up_direction="Z+", fill_sheet=False, grain_direction="None"):
         """Helper function to create and populate a single row in the parts table."""
         label_item = QtWidgets.QTableWidgetItem(label)
         label_item.setFlags(label_item.flags() & ~QtCore.Qt.ItemIsEditable)
@@ -712,6 +764,26 @@ class NestingPanel(QtWidgets.QWidget):
         up_dir_combo.setCurrentText(up_direction)
         up_dir_combo.setToolTip(QT_TRANSLATE_NOOP("NestingPanel", "Define which direction is 'up' for this part when projecting to 2D."))
 
+        grain_dir_combo = QtWidgets.QComboBox()
+        grain_dir_combo.addItem(QT_TRANSLATE_NOOP("NestingPanel", "None"), "None")
+        for axis in "XYZ":
+            grain_dir_combo.addItem(axis, axis)
+        grain_dir_combo.setCurrentIndex(max(0, grain_dir_combo.findData(grain_direction)))
+        grain_dir_combo.setToolTip(QT_TRANSLATE_NOOP(
+            "NestingPanel", "Grain axis in the same source coordinates as Up Dir. Must be perpendicular to Up Dir. "
+            "Aligns with the sheet grain and allows a 180 degree turn only, overriding rotation steps. None allows normal rotations."
+        ))
+
+        def update_grain_choices():
+            for index in range(1, grain_dir_combo.count()):
+                grain_dir_combo.model().item(index).setEnabled(
+                    grain_dir_combo.itemData(index) != up_dir_combo.currentText()[0])
+            # Keep an existing choice visible even if Up Dir now makes it
+            # invalid. Run Nesting reports the conflict rather than discarding it.
+
+        up_dir_combo.currentTextChanged.connect(lambda _: update_grain_choices())
+        update_grain_choices()
+
         fill_checkbox = make_checkbox(
             "", checked=fill_sheet,
             tooltip=QT_TRANSLATE_NOOP("NestingPanel", "The quantity is always placed. If checked, extra copies are then added to fill the remaining space.")
@@ -721,7 +793,26 @@ class NestingPanel(QtWidgets.QWidget):
         self.shape_table.setCellWidget(row_index, 1, quantity_spinbox)
         self.shape_table.setCellWidget(row_index, 2, rotation_widget)
         self.shape_table.setCellWidget(row_index, 3, up_dir_combo)
-        self.shape_table.setCellWidget(row_index, 4, fill_checkbox)
+        self.shape_table.setCellWidget(row_index, 4, grain_dir_combo)
+        self.shape_table.setCellWidget(row_index, 5, fill_checkbox)
+
+        def remember_part(*_):
+            obj = label_item.data(QtCore.Qt.UserRole)
+            save_part_settings(obj, {
+                'quantity': quantity_spinbox.value(),
+                'rotation_steps': rotation_spinbox.value(),
+                'override_rotation': override_checkbox.isChecked(),
+                'up_direction': up_dir_combo.currentText(),
+                'grain_direction': grain_dir_combo.currentData(),
+                'fill_sheet': fill_checkbox.isChecked(),
+            })
+
+        quantity_spinbox.valueChanged.connect(remember_part)
+        rotation_spinbox.valueChanged.connect(remember_part)
+        override_checkbox.toggled.connect(remember_part)
+        up_dir_combo.currentIndexChanged.connect(remember_part)
+        grain_dir_combo.currentIndexChanged.connect(remember_part)
+        fill_checkbox.toggled.connect(remember_part)
 
     def select_font_file(self):
         """Opens a file dialog to let the user select a font file."""
@@ -741,6 +832,7 @@ class NestingPanel(QtWidgets.QWidget):
             self.selected_font_path = font_path
             # Display just the filename for a cleaner UI
             self.font_label.setText(os.path.basename(font_path))
+            self.save_persisted_settings()
 
     def set_default_font(self):
         """Checks for and sets a default font on initialization."""
@@ -775,45 +867,13 @@ class NestingPanel(QtWidgets.QWidget):
             pass  # GUI window closed
 
     def load_persisted_settings(self):
-        """Loads settings from FreeCAD preferences."""
-        prefs = FreeCAD.ParamGet(PREFS_PATH)
-        self.sheet_width_input.setValue(prefs.GetFloat(PROP_SHEET_WIDTH, 600.0))
-        self.sheet_height_input.setValue(prefs.GetFloat(PROP_SHEET_HEIGHT, 600.0))
-        self.part_spacing_input.setValue(prefs.GetFloat(PROP_PART_SPACING, 12.5))
-        self.sheet_thickness_input.setValue(prefs.GetFloat(PROP_SHEET_THICKNESS, 3.0))
-        self.label_size_input.setValue(prefs.GetFloat(PROP_LABEL_SIZE, 10.0))
-        self.deflection_input.setValue(prefs.GetFloat(PROP_DEFLECTION_ANGLE, 30.0) or 30.0)
-        self.simplification_input.setValue(prefs.GetFloat(PROP_SIMPLIFICATION, 1.0))
-        self.minkowski_compactness_input.setValue(prefs.GetFloat("GACompactnessWeight", 1.0))
-        self.verbose_logging_checkbox.setChecked(prefs.GetBool("VerboseLogging", False))
-        self.physics_improvement_threshold_input.setValue(prefs.GetFloat("PhysicsStabilityTolerance", 0.01))
-        
-        self.physics_anneal_curve_type.setCurrentText(prefs.GetString("PhysicsAnnealCurveType", "Logarithmic"))
-        self.physics_anneal_min_amp.setValue(prefs.GetFloat("PhysicsAnnealMinAmp", 0.1))
-        self.physics_anneal_max_amp.setValue(prefs.GetFloat("PhysicsAnnealMaxAmp", 100.0))
-        
-        self.physics_anneal_rot_steps.setValue(prefs.GetInt("PhysicsAnnealRotSteps", 10))
-        self.physics_anneal_rot_curve_type.setCurrentText(prefs.GetString("PhysicsAnnealRotCurveType", "Logarithmic"))
-        self.physics_anneal_rot_min.setValue(prefs.GetFloat("PhysicsAnnealRotMin", 1.0))
-        self.physics_anneal_rot_max.setValue(prefs.GetFloat("PhysicsAnnealRotMax", 90.0))
-        
-        # Load Rotation Steps (Isolated)
-        # Minkowski
-        mink_rot_steps = prefs.GetInt("MinkowskiRotationSteps", 4) # Default 90 deg (4 steps)
-        if mink_rot_steps > 0:
-            target_angle = 360.0 / mink_rot_steps
-            self.minkowski_rotation_steps_slider.setValue(
-                closest_angle_index(self.rotation_angles, target_angle)
-            )
-            
-        # Physics
-        phys_rot_steps = prefs.GetInt("PhysicsRotationSteps", 4) # Default 90 deg (4 steps)
-        if phys_rot_steps > 0:
-            target_angle = 360.0 / phys_rot_steps
-            self.physics_rotation_steps_slider.setValue(
-                closest_angle_index(PHYSICS_ROTATION_PRESETS, target_angle)
-            )
-        
+        """Restore every input before connecting preference-saving signals."""
+        load_panel_settings(self)
+
+    def save_persisted_settings(self, *_):
+        """Remember raw inputs even when no nesting job is run or accepted."""
+        save_panel_settings(self)
+
     def update_progress(self, current, total, message=None):
         """Updates the progress bar."""
         try:

@@ -5,7 +5,6 @@ import random
 import copy
 from datetime import datetime
 import numpy as np
-from shapely.affinity import rotate
 
 try:
     import FreeCAD
@@ -13,14 +12,18 @@ except ImportError:
     FreeCAD = None
 from ....datatypes.sheet import Sheet
 from ....datatypes.placed_part import PlacedPart
+from ....rotation_constraints import placement_angles
+from ....edge_spacing import part_edge_extents
 from . import genetic_utils
 from .minkowski_engine import MinkowskiEngine
+from .rotation_cache import RotationCache
+from ..cancellation import NestingCancelled, check_cancel
 
 class PlacementOptimizer:
     """
     Handles the geometric logic of finding the best position for a part on a sheet.
     """
-    def __init__(self, engine, rotation_steps, search_direction, log_callback=None, trial_callback=None, rng=None):
+    def __init__(self, engine, rotation_steps, search_direction, log_callback=None, trial_callback=None, rng=None, rotation_cache=None):
         self.engine = engine
         self.rotation_steps = max(1, rotation_steps)
         self.search_direction = search_direction
@@ -31,6 +34,7 @@ class PlacementOptimizer:
         self.trial_callback = trial_callback
         self.rng = rng or random  # Seeded random.Random for reproducible runs, or the global module
         self.verbose = False
+        self.rotation_cache = rotation_cache if rotation_cache is not None else RotationCache()
 
     def log(self, message):
         if self.log_callback:
@@ -38,8 +42,9 @@ class PlacementOptimizer:
 
     def find_best_placement(self, part, sheet):
         """
-        Parallel evaluation of rotations to find best spot.
+        Evaluate permitted rotations to find the best spot.
         """
+        check_cancel(self.engine.cancel_callback)
         if part.original_polygon is None and part.polygon is not None:
             part.original_polygon = part.polygon
             
@@ -50,16 +55,7 @@ class PlacementOptimizer:
 
         best_result = {'metric': float('inf')}
         
-        part_rotation_steps = getattr(part, 'rotation_steps', None)
-        if part_rotation_steps is None or part_rotation_steps < 1:
-            part_rotation_steps = self.rotation_steps
-        part_rotation_steps = max(1, part_rotation_steps)
-        
-        gene_angle = getattr(part, 'gene_angle', None)
-        if gene_angle is not None:
-            angles = [gene_angle % 360.0]
-        else:
-            angles = [i * (360.0 / part_rotation_steps) for i in range(part_rotation_steps)]
+        angles = placement_angles(part, self.rotation_steps)
         
         # Drop rotations this sheet has already proven impossible at its current
         # occupancy — placed parts have not moved since, so the verdict stands.
@@ -80,6 +76,7 @@ class PlacementOptimizer:
         total_score_ms = 0.0
 
         for angle in angles:
+            check_cancel(self.engine.cancel_callback)
             try:
                 res = self._evaluate_rotation(angle, part, sheet, direction)
                 if res:
@@ -89,6 +86,8 @@ class PlacementOptimizer:
                         best_result = res
                         if self.trial_callback and best_result.get('x') is not None:
                             self.trial_callback(part, best_result['angle'], best_result['x'], best_result['y'], sheet)
+            except NestingCancelled:
+                raise
             except Exception as e:
                 self.log(f"Error in rotation evaluation: {e}")
 
@@ -106,6 +105,7 @@ class PlacementOptimizer:
 
 
 
+        check_cancel(self.engine.cancel_callback)
         if best_result.get('x') is not None:
              part.set_rotation(best_result['angle'], reposition=False)
              curr = part.centroid
@@ -124,21 +124,20 @@ class PlacementOptimizer:
         t0 = _time.perf_counter()
         thread_id = threading.current_thread().name
 
-        rotated_poly = rotate(part.original_polygon, angle, origin='centroid')
-        if not rotated_poly: return {'metric': float('inf')}
+        if not part.original_polygon: return {'metric': float('inf')}
 
         # Candidate positions are centroid positions — express the rotated
         # bounds relative to the centroid for corner seeds and bounds checks.
-        centroid = rotated_poly.centroid
-        min_x, min_y, max_x, max_y = rotated_poly.bounds
-        extents = (min_x - centroid.x, min_y - centroid.y,
-                   max_x - centroid.x, max_y - centroid.y)
+        extents = part_edge_extents(part, angle, self.rotation_cache)
         w_bin, h_bin = self.engine.bin_width, self.engine.bin_height
+        edge = sheet.edge_spacing
+        if extents[2] - extents[0] > w_bin - 2 * edge + 1e-7 or extents[3] - extents[1] > h_bin - 2 * edge + 1e-7:
+            return {'metric': float('inf')}
         corners = np.array([
-            [-extents[0],         -extents[1]        ],
-            [w_bin - extents[2],  -extents[1]        ],
-            [-extents[0],         h_bin - extents[3] ],
-            [w_bin - extents[2],  h_bin - extents[3] ],
+            [edge - extents[0],         edge - extents[1]        ],
+            [w_bin - edge - extents[2], edge - extents[1]        ],
+            [edge - extents[0],         h_bin - edge - extents[3]],
+            [w_bin - edge - extents[2], h_bin - edge - extents[3]],
         ], dtype=np.float64)
 
         pts_arr = self.engine.get_incremental_candidates(part, angle, sheet, corners, extents)
@@ -174,6 +173,7 @@ class Nester:
         self.bin_width = width
         self.bin_height = height
         self.spacing = kwargs.get("spacing", 0)
+        self.edge_spacing = max(0.0, float(kwargs.get('edge_spacing', 0.0)))
         self.search_direction = kwargs.get("search_direction", (0, -1)) # Default Down
         
         # Logging control
@@ -188,11 +188,14 @@ class Nester:
         self.spawn_more_callback = kwargs.get("spawn_more_callback")  # Mints fill-part instances on the main thread
         
         step_size = kwargs.get("step_size", 5.0) 
-        self.engine = MinkowskiEngine(width, height, step_size, log_callback=self.log_callback, verbose=self.verbose, search_direction=self.search_direction, rng=kwargs.get("rng"))
+        self.engine = MinkowskiEngine(width, height, step_size, log_callback=self.log_callback, verbose=self.verbose,
+                                      search_direction=self.search_direction, rng=kwargs.get("rng"),
+                                      cancel_callback=self.cancel_callback)
         # quiet (multi-layout GA) silences the optimizer's per-placement [TIMING] lines
         self.optimizer = PlacementOptimizer(self.engine, rotation_steps, self.search_direction,
                                             None if self.quiet else self.log_callback,
-                                            self.trial_callback, rng=kwargs.get("rng"))
+                                            self.trial_callback, rng=kwargs.get("rng"),
+                                            rotation_cache=kwargs.get("rotation_cache"))
         self.optimizer.verbose = self.verbose
 
         self.parts_to_place = []
@@ -297,7 +300,8 @@ class Nester:
                     break
 
             if not placed:
-                new_sheet = Sheet(len(sheets), self.bin_width, self.bin_height, spacing=self.spacing)
+                new_sheet = Sheet(len(sheets), self.bin_width, self.bin_height, spacing=self.spacing,
+                                  edge_spacing=self.edge_spacing)
                 if self._attempt_placement_on_sheet(part, new_sheet):
                     sheets.append(new_sheet)
                     placed = True
@@ -342,8 +346,13 @@ class Nester:
         """
         from collections import deque
 
+        for sheet in sheets:
+            if sheet.edge_spacing != self.edge_spacing:
+                sheet.edge_spacing = self.edge_spacing
+                sheet.__dict__.pop('_cand_cache', None)
         if not sheets:
-            sheets.append(Sheet(0, self.bin_width, self.bin_height, spacing=self.spacing))
+            sheets.append(Sheet(0, self.bin_width, self.bin_height, spacing=self.spacing,
+                                edge_spacing=self.edge_spacing))
 
         # Group by explicit master_label — NEVER parse part.id (display string,
         # no format guarantee; parsing it once caused exponential spawn growth).
@@ -376,6 +385,8 @@ class Nester:
                 try:
                     new_part = (self.spawn_more_callback(spawn_fn)
                                 if self.spawn_more_callback else spawn_fn())
+                except NestingCancelled:
+                    raise
                 except Exception as e:
                     self.log(f"Could not spawn fill part '{part_type}': {e}", level="warning")
                     continue

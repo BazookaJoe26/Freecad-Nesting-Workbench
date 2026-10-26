@@ -27,12 +27,19 @@ To re-nest an existing layout, select its `Layout_*` group before you open the p
 
 ### 3. Configuring options
 
+Panel inputs are remembered as you change them, including sheet grain, the selected algorithm, both algorithms' options, labels, font and offsets. Closing or cancelling the panel keeps these settings even if no nesting job was run. Quantity, rotation override, Up Dir, Grain Dir and Fill are remembered separately for each source object in its document, including after saving and reopening the document. A saved layout's own part settings take precedence when re-nesting it.
+
 **Nesting Algorithm:** **Minkowski** (the default) places parts using No-Fit Polygons. **Physics** drops parts in and shakes them together with a physics simulation.
 
 #### Sheet Setup
+**Sheet Width, Sheet Height, Sheet Thickness and Part Spacing** use FreeCAD's native numeric length fields with **fx** expression editing, just like the XYZ offsets. Enter numbers directly or use **fx** (or `=`) for expressions such as `Spreadsheet.Width` and `Spreadsheet.Thickness`. The previous value ranges still apply. Formulas are remembered in preferences and saved with the layout. They are evaluated again for each nesting run; re-run nesting after changing their variables to update the sheet geometry and packing. Existing layout dimensions remain the values used to generate that layout until it is re-nested.
+
 *   **Sheet Width / Height:** Size of the material sheet.
-*   **Sheet Thickness:** Thickness of the material, used for the 3D view and CAM.
-*   **Part Spacing:** Minimum gap between nested parts.
+*   **Sheet Thickness:** Thickness of the material. Sheets are shown as translucent solids centred on the original nesting plane, extending equally above and below it (e.g. 12 mm thickness extends from Z=-6 to Z=+6 before layout offsets). Applies to finished layouts, simulation and manually added sheets. DXF exports retain a single flat sheet outline on the reference plane. Re-nest existing layouts to update previously generated sheets.
+*   **Sheet Grain Direction:** Optional material grain along **X** (sheet width) or **Y** (sheet height). **None** (default) disables grain constraints and uses the normal rotation settings, even for parts with **Grain Dir** set. Existing per-part grain choices are kept for when sheet grain is enabled again.
+*   **Part Spacing:** Minimum gap between nested parts. This does not add a margin at the sheet edges; actual part outlines can sit flush with the sheet.
+*   **Custom Edge Spacing:** Tick to enter a separate minimum clearance from the actual part outline to all four sheet edges. Unchecked means **0 mm** edge spacing. This is independent of Part Spacing and applies to both automatic algorithms, GA workers and Fill copies. The checkbox and its value are remembered and saved with the layout.
+*   **X / Y / Z Offset:** Moves the complete layout, including all sheets, parts and labels. Uses FreeCAD's native numeric length fields with step buttons and an **fx** icon. Enter positive or negative numbers directly; use **fx** (or `=`) to open the standard expression editor for variables such as `Spreadsheet.OffsetX` or `Spreadsheet.OffsetX + 5 mm`. The field displays the evaluated length, and direct numeric entries remain ordinary values. Spreadsheet names and aliases must exist in the current document. Offsets and their expressions are saved on the layout as `OffsetX`, `OffsetY` and `OffsetZ`, and are restored when reopening it. Changing a referenced variable and recomputing the document moves the saved layout automatically. Offsets do not affect sheet dimensions or the nesting calculation.
 *   **Bounds Resolution:**
     *   **Curve:** How closely curved edges are approximated. Small angles (5–10°) give smoother curves but nest more slowly. Large angles (30°+) are faster but coarser.
     *   **Simplify:** Tolerance (mm) for removing redundant boundary points. Setting it to your machine's precision (e.g. 1 mm for a router) speeds up nesting.
@@ -63,6 +70,7 @@ These cover gravity direction, step size, spawn attempts, and an **Annealing (Sh
 *   **Quantity:** How many copies of the part to nest.
 *   **Rotations:** Tick the box to override the global rotation for this part and set its own step count. 0 or 1 means the part is never rotated.
 *   **Up Dir:** The axis (Z+, Y+, X− …) treated as "up" when the 3D part is projected to 2D.
+*   **Grain Dir:** The part's grain axis (**X**, **Y** or **Z**), using the same source coordinates as **Up Dir**. Choose an axis perpendicular to Up Dir. The nester aligns it parallel to the sheet grain; only a 180° turn is allowed. This takes precedence over global and per-part rotation settings, including Physics shaking, GA optimization and extra Fill copies. **None** (default) uses the normal rotation settings. Both grain settings are saved with the layout. For example: **Up Dir = Z+**, **Grain Dir = Y**, **Sheet Grain Direction = X** rotates the part by 90° or 270°. Grain is bidirectional; this option does not distinguish head from tail.
 *   **Fill:** The **Quantity** is always placed. If Fill is ticked, extra copies are then added to fill any remaining space.
 
 ### 4. Generating the layout

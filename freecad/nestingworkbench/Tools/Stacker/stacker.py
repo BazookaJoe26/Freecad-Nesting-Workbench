@@ -10,6 +10,7 @@ import FreeCAD
 import ast
 from ...freecad_helpers import get_layout_group, get_sheet_groups, get_all_objects_recursive
 from ...constants import *
+from ...layout_offsets import layout_offset, set_layout_placement, sheet_placement_objects
 
 class SheetStacker:
     """Handles the logic for finding, stacking, and unstacking sheet layouts."""
@@ -72,7 +73,9 @@ class SheetStacker:
                 continue
             # Store placement as a string representation of a tuple:
             # (Base.x, Base.y, Base.z, Rotation.Q[0], Rotation.Q[1], Rotation.Q[2], Rotation.Q[3])
-            p = obj.Placement
+            p = obj.Placement.copy()
+            if getattr(obj, 'NestingLayout', None):
+                p.Base -= layout_offset(obj.NestingLayout)
             placement_str = str((p.Base.x, p.Base.y, p.Base.z, p.Rotation.Q[0], p.Rotation.Q[1], p.Rotation.Q[2], p.Rotation.Q[3]))
             placements_dict[obj.Name] = placement_str
         self.layout_group.OriginalPlacements = placements_dict
@@ -96,10 +99,10 @@ class SheetStacker:
             move_vec = target_pos - original_pos
             
             # Apply this transformation to all objects within this sheet's group
-            objects_to_move = get_all_objects_recursive(sheet_group)
+            objects_to_move = sheet_placement_objects(sheet_group)
             for obj in objects_to_move:
                 new_placement = FreeCAD.Placement(move_vec, FreeCAD.Rotation()).multiply(obj.Placement)
-                obj.Placement = new_placement
+                set_layout_placement(obj, new_placement)
 
         self.layout_group.IsStacked = True
         FreeCAD.Console.PrintMessage("Sheets are now stacked.\n")
@@ -124,8 +127,10 @@ class SheetStacker:
                     FreeCAD.Console.PrintWarning(f"Could not parse placement data for '{obj.Name}'. Skipping.\n")
                     continue
                 base = FreeCAD.Vector(data[0], data[1], data[2])
+                if getattr(obj, 'NestingLayout', None):
+                    base += layout_offset(obj.NestingLayout)
                 rot = FreeCAD.Rotation(data[3], data[4], data[5], data[6])
-                obj.Placement = FreeCAD.Placement(base, rot)
+                set_layout_placement(obj, FreeCAD.Placement(base, rot))
         
         self.layout_group.IsStacked = False
         FreeCAD.Console.PrintMessage("Sheets are now unstacked.\n")

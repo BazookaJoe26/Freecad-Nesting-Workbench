@@ -71,6 +71,7 @@ class Shape:
         self.deflection = 0.05 # The deflection tolerance used.
         self.simplification = 1.0 # The simplification tolerance used.
         self.up_direction = "Z+" # The up direction for 2D projection
+        self.grain_angles = None # None, or the two rotations parallel to the sheet grain
         self.fill_sheet = False # If True, use to fill remaining space
         
         self.fc_object = None # Link to the physical FreeCAD object in the 'PartsToPlace' group
@@ -249,7 +250,8 @@ class Shape:
         """
         Returns the area of the shape's bounds.
         """
-        return self.polygon.area if self.polygon else 0.0
+        polygon = self.unbuffered_polygon if self.unbuffered_polygon is not None else self.polygon
+        return polygon.area if polygon is not None else 0.0
 
     @property
     def angle(self):

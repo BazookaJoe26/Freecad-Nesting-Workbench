@@ -145,7 +145,7 @@ def _sheet_origin_xy(sheet):
         return origin.x, origin.y
     return origin[0], origin[1]
 
-def _visualize_trial_placement(part, angle, x, y, sheet, viz_manager):
+def _visualize_trial_placement(part, angle, x, y, sheet, viz_manager, layout_offset=(0, 0, 0)):
 # ... (rest of function)
     if not viz_manager: return
     doc = FreeCAD.ActiveDocument
@@ -162,11 +162,12 @@ def _visualize_trial_placement(part, angle, x, y, sheet, viz_manager):
             # x/y are sheet-local — offset by the sheet origin so the preview is
             # drawn over the sheet being packed, not always over sheet 1.
             ox, oy = _sheet_origin_xy(sheet)
-            translated_poly = translate(rotated_poly, xoff=x - cx + ox, yoff=y - cy + oy)
+            translated_poly = translate(rotated_poly, xoff=x - cx + ox + layout_offset[0],
+                                        yoff=y - cy + oy + layout_offset[1])
             
             # Convert shapely polygon to FreeCAD wire
             coords = list(translated_poly.exterior.coords)
-            points = [FreeCAD.Vector(c[0], c[1], 0) for c in coords]
+            points = [FreeCAD.Vector(c[0], c[1], layout_offset[2]) for c in coords]
             wire = Part.makePolygon(points)
             
             # Use the visualization manager to draw
@@ -217,12 +218,12 @@ def _hide_sim_outlines(parts):
         if view_object is not None:
             view_object.Visibility = False
 
-def _bind_sim_callbacks(kwargs, viz_manager):
+def _bind_sim_callbacks(kwargs, viz_manager, layout_offset=(0, 0, 0)):
     """Attach trial/part-start/part-end callbacks; returns the viz_manager to use."""
     if viz_manager is None:
         viz_manager = VisualizationManager()
     kwargs['trial_callback'] = _latest_only_main_thread_wrapper(
-        lambda p, a, x, y, sheet: _visualize_trial_placement(p, a, x, y, sheet, viz_manager)
+        lambda p, a, x, y, sheet: _visualize_trial_placement(p, a, x, y, sheet, viz_manager, layout_offset)
     )
     kwargs['part_start_callback'] = _main_thread_wrapper(
         lambda p: _on_part_start(p, viz_manager)
@@ -230,12 +231,13 @@ def _bind_sim_callbacks(kwargs, viz_manager):
     kwargs['part_end_callback'] = lambda p, pl: _on_part_end(p, pl, viz_manager)
     return viz_manager
 
-def _bind_sim_update(nester):
+def _bind_sim_update(nester, layout_offset=(0, 0, 0), sheet_thickness=3.0):
     """Attach the per-placement redraw callback."""
     def update_sim_view(part, sheet):
         doc = FreeCAD.ActiveDocument
         if doc:
-            sheet.draw(doc, {}, transient_part=part)
+            sheet.draw(doc, {'layout_offset': layout_offset, 'sheet_thickness': sheet_thickness},
+                       transient_part=part)
             doc.recompute()
         FreeCADGui.updateGui()
     nester.update_callback = _main_thread_wrapper(update_sim_view)
@@ -255,6 +257,8 @@ def nest(parts, width, height, rotation_steps=1, simulate=False, algorithm='Mink
     """
 
     sort = kwargs.pop('sort', True)
+    layout_offset = kwargs.pop('layout_offset', (0, 0, 0))
+    sheet_thickness = kwargs.pop('sheet_thickness', 3.0)
     # Optional out-param: a list the nester's consumption order is
     # appended to, so the GA can record a chromosome that reproduces
     # the layout it describes without re-deriving the nester's sort.
@@ -271,7 +275,7 @@ def nest(parts, width, height, rotation_steps=1, simulate=False, algorithm='Mink
 
     # If simulation is enabled, ensure we have a viz_manager and bind callbacks
     if simulate:
-        viz_manager = _bind_sim_callbacks(kwargs, viz_manager)
+        viz_manager = _bind_sim_callbacks(kwargs, viz_manager, layout_offset)
 
     if algorithm == 'Physics':
         nester = physics_nester.PhysicsNester(width, height, rotation_steps, **kwargs)
@@ -279,17 +283,18 @@ def nest(parts, width, height, rotation_steps=1, simulate=False, algorithm='Mink
         nester = nesting_strategy.Nester(width, height, rotation_steps, **kwargs)
 
     if simulate:
-        _bind_sim_update(nester)
+        _bind_sim_update(nester, layout_offset, sheet_thickness)
 
     import time
     start_time = time.monotonic()
-    result = nester.nest(parts_to_process, sort=sort)
+    try:
+        result = nester.nest(parts_to_process, sort=sort)
+    finally:
+        if simulate:
+            _teardown_sim(viz_manager, parts_to_process)
     elapsed = time.monotonic() - start_time
     if order_out is not None:
         order_out.extend(getattr(nester, 'last_consumption_order', []))
-    
-    if simulate:
-        _teardown_sim(viz_manager, parts_to_process)
     
     if len(result) == 3:
         sheets, unplaced, steps = result
@@ -317,24 +322,27 @@ def fill_existing_sheets(sheets, fill_parts, width, height, rotation_steps=1,
         raise NestingDependencyError("The selected algorithm requires the 'Shapely' library.")
 
     kwargs.pop('sort', None)
+    layout_offset = kwargs.pop('layout_offset', (0, 0, 0))
+    sheet_thickness = kwargs.pop('sheet_thickness', 3.0)
     if simulate:
-        viz_manager = _bind_sim_callbacks(kwargs, viz_manager)
+        viz_manager = _bind_sim_callbacks(kwargs, viz_manager, layout_offset)
 
     nester = nesting_strategy.Nester(width, height, rotation_steps, **kwargs)
 
     if simulate:
-        _bind_sim_update(nester)
+        _bind_sim_update(nester, layout_offset, sheet_thickness)
 
     import time
     start_time = time.monotonic()
     ordered_fill = sorted(fill_parts, key=lambda p: p.area, reverse=True)
     unplaced = []
-    nester._nest_fill_parts(sheets, ordered_fill, unplaced,
-                            quiet=kwargs.get('quiet', False))
+    try:
+        nester._nest_fill_parts(sheets, ordered_fill, unplaced,
+                                quiet=kwargs.get('quiet', False))
+    finally:
+        if simulate:
+            _teardown_sim(viz_manager, ordered_fill)
     elapsed = time.monotonic() - start_time
-
-    if simulate:
-        _teardown_sim(viz_manager, ordered_fill)
 
     return unplaced, elapsed
 

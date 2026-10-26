@@ -9,6 +9,7 @@ from shapely.ops import unary_union
 import FreeCAD
 from ....datatypes.sheet import Sheet
 from ....datatypes.placed_part import PlacedPart
+from ....rotation_constraints import constrain_angle, rotation_angles
 
 class BaseNester(object):
     """
@@ -19,6 +20,7 @@ class BaseNester(object):
         self._bin_width = width
         self._bin_height = height
         self.rotation_steps = max(1, rotation_steps)
+        self.edge_spacing = max(0.0, float(kwargs.get('edge_spacing', 0.0)))
         self.max_spawn_count = kwargs.get("max_spawn_count", 100)
         self.anneal_steps = kwargs.get("anneal_steps", 25)
         self.step_size = kwargs.get("step_size", 5.0)
@@ -88,7 +90,8 @@ class BaseNester(object):
                     break
             
             if not placed:
-                new_sheet = Sheet(len(self.sheets), self._bin_width, self._bin_height)
+                new_sheet = Sheet(len(self.sheets), self._bin_width, self._bin_height,
+                                  edge_spacing=self.edge_spacing)
                 placed_shape = self._try_place_part_on_sheet(part, new_sheet)
                 if placed_shape:
                     sheet_origin = new_sheet.get_origin()
@@ -177,11 +180,15 @@ class BaseNester(object):
 
             for r in range(rot_loops):
                 if rotate_enabled and self.anneal_rot_steps > 0:
-                    jitter = random.uniform(-rot_amp, rot_amp)
-                    target_angle = current_state[2] + jitter
+                    if getattr(part, 'grain_angles', None) is not None:
+                        target_angle = random.choice(rotation_angles(part))
+                    else:
+                        jitter = random.uniform(-rot_amp, rot_amp)
+                        target_angle = current_state[2] + jitter
                 else:
                     target_angle = current_state[2]
 
+                target_angle = constrain_angle(part, target_angle)
                 part.set_rotation(target_angle)
                 
                 if sheet.is_placement_valid(part, part_to_ignore=part):

@@ -15,7 +15,10 @@ PROP_STRING = "App::PropertyString"
 # -- Layout Property Names --
 PROP_SHEET_WIDTH = "SheetWidth"
 PROP_SHEET_HEIGHT = "SheetHeight"
+PROP_SHEET_GRAIN_DIRECTION = "SheetGrainDirection"
 PROP_PART_SPACING = "PartSpacing"
+PROP_CUSTOM_EDGE_SPACING = "CustomEdgeSpacing"
+PROP_EDGE_SPACING = "EdgeSpacing"
 PROP_SHEET_THICKNESS = "SheetThickness"
 PROP_DEFLECTION_ANGLE = "DeflectionAngle"
 PROP_SIMPLIFICATION = "Simplification"
@@ -29,11 +32,19 @@ PROP_GENERATIONS = "Generations"
 PROP_POPULATION_SIZE = "PopulationSize"
 PROP_NESTING_DIRECTION = "NestingDirection"
 PROP_ALGORITHM = "Algorithm"
+LAYOUT_OFFSET_PROPERTIES = ("OffsetX", "OffsetY", "OffsetZ")
+SHEET_LENGTH_FIELDS = {
+    "sheet_width_input": (PROP_SHEET_WIDTH, "sheet_width"),
+    "sheet_height_input": (PROP_SHEET_HEIGHT, "sheet_height"),
+    "sheet_thickness_input": (PROP_SHEET_THICKNESS, "sheet_thickness"),
+    "part_spacing_input": (PROP_PART_SPACING, "spacing"),
+}
 
 # -- Master-Container (per-part) Property Names --
 PROP_PART_ROTATION_OVERRIDE = "PartRotationOverride"
 PROP_PART_ROTATION_STEPS = "PartRotationSteps"
 PROP_UP_DIRECTION = "UpDirection"
+PROP_GRAIN_DIRECTION = "GrainDirection"
 PROP_FILL_SHEET = "FillSheet"
 PROP_QUANTITY = "Quantity"
 

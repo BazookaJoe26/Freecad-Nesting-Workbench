@@ -166,7 +166,7 @@ def crossover_genes(parent1_genes, parent2_genes, rng=None):
 
     return child
 
-def mutate_genes(genes, mutation_rate, rotation_steps, rng=None):
+def mutate_genes(genes, mutation_rate, rotation_steps, rng=None, angle_options=None):
     """
     Mutation on (part_id, angle) gene tuples. Returns a new list (not in-place).
 
@@ -197,7 +197,12 @@ def mutate_genes(genes, mutation_rate, rotation_steps, rng=None):
             i = rng.randint(0, len(genes) - 2)
             genes[i], genes[i + 1] = genes[i + 1], genes[i]
 
-    if rotation_steps > 1:
+    if angle_options is not None:
+        for idx, (part_id, _angle) in enumerate(genes):
+            options = angle_options[part_id]
+            if len(options) > 1 and rng.random() < mutation_rate:
+                genes[idx] = (part_id, rng.choice(options))
+    elif rotation_steps > 1:
         # Per gene, not once per chromosome. A single draw per child changes
         # exactly one angle whether the job has 5 parts or 500, which is far
         # too little angular diversity to search a real rotation space.

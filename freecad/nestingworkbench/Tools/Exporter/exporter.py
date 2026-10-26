@@ -11,6 +11,7 @@ import Part
 import os
 import importDXF
 from ...freecad_helpers import get_layout_group, get_sheet_groups, get_all_objects_recursive, recursive_delete
+from ...constants import SHEET_BOUNDARY_PREFIX
 
 class SheetExporter:
     """
@@ -73,7 +74,14 @@ class SheetExporter:
                     
                     # Project the base shape to a 2D entity at the origin
                     # ShapeStrings are Compounds, so we check for that type as well. 
-                    if isinstance(base_shape, (Part.Wire, Part.Face, Part.Compound)):
+                    if obj.Label.startswith(SHEET_BOUNDARY_PREFIX):
+                        # Project solid stock to its original reference plane,
+                        # with no upper/lower/vertical duplicate edges.
+                        base_shape.Placement = FreeCAD.Placement()
+                        bounds = base_shape.BoundBox
+                        shape_2d = Part.makePlane(bounds.XLength, bounds.YLength,
+                                                  FreeCAD.Vector(bounds.XMin, bounds.YMin, 0))
+                    elif isinstance(base_shape, (Part.Wire, Part.Face, Part.Compound)):
                         shape_2d = base_shape
                     else:
                         shape_2d = base_shape.toShape2D()

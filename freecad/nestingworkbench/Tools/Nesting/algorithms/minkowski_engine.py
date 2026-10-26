@@ -13,6 +13,7 @@ from shapely.geometry import Polygon
 from shapely.affinity import translate, rotate
 from . import minkowski_utils
 from ....datatypes.shape import Shape
+from ..cancellation import NestingCancelled, check_cancel
 
 ANGLE_WRAP_EPS_DEG = 1e-5  # treat 359.99999→360 as 0 after the modulo
 
@@ -30,10 +31,11 @@ def _warn_hole_fit_failed(cache_key, error, log):
         f"({error}). '{pair[1]}' will not be nested inside those holes; "
         f"outside placements are unaffected.", level="warning")
 
-def compute_and_cache_nfp(shape_A, angle_A, part_to_place, angle_B, cache_key, log=None, step_size=5.0):
+def compute_and_cache_nfp(shape_A, angle_A, part_to_place, angle_B, cache_key, log=None, step_size=5.0, cancel_callback=None):
     """Computes the NFP for one (A, B, relative-angle) pair and stores it in
     Shape.nfp_cache under cache_key. Pure Shapely — safe on any thread.
     Returns the cache entry."""
+    check_cancel(cancel_callback)
     if log is None:
         def log_fallback(msg, level=None):
             if FreeCAD and hasattr(FreeCAD, 'Console'):
@@ -65,11 +67,13 @@ def compute_and_cache_nfp(shape_A, angle_A, part_to_place, angle_B, cache_key, l
         cA, cB = mA.centroid, mB.centroid
         poly_A_centered = translate(mA, -cA.x, -cA.y)
         poly_B_centered = translate(mB, -cB.x, -cB.y)
-        nfp_exterior = minkowski_utils.minkowski_sum(poly_A_centered, angle_A, False, poly_B_centered, angle_B, True, log)
+        nfp_exterior = minkowski_utils.minkowski_sum(poly_A_centered, angle_A, False, poly_B_centered, angle_B, True, log,
+                                                    cancel_callback=cancel_callback)
         nfp_interiors = []
         if poly_A_centered.interiors:
             B_rot = rotate(poly_B_centered, angle_B, origin=(0, 0))
             for hole in poly_A_centered.interiors:
+                check_cancel(cancel_callback)
                 hole_poly = Polygon(hole.coords)
                 if (B_rot.bounds[2] - B_rot.bounds[0] < hole_poly.bounds[2] - hole_poly.bounds[0] and
                     B_rot.bounds[3] - B_rot.bounds[1] < hole_poly.bounds[3] - hole_poly.bounds[1] and
@@ -78,7 +82,10 @@ def compute_and_cache_nfp(shape_A, angle_A, part_to_place, angle_B, cache_key, l
                     # it reach the outer except would cache an error for the whole
                     # pair and skip this rotation everywhere, not just in the hole.
                     try:
-                        ifp = minkowski_utils.calculate_inner_fit_polygon(hole_poly, 0, poly_B_centered, angle_B, log)
+                        ifp = minkowski_utils.calculate_inner_fit_polygon(hole_poly, 0, poly_B_centered, angle_B, log,
+                                                                         cancel_callback=cancel_callback)
+                    except NestingCancelled:
+                        raise
                     except Exception as e:
                         _warn_hole_fit_failed(cache_key, e, log)
                         continue
@@ -96,9 +103,12 @@ def compute_and_cache_nfp(shape_A, angle_A, part_to_place, angle_B, cache_key, l
             nfp_data = {"polygon": master_nfp, "local_points": local_pts}
         else:
             nfp_data = {}
+    except NestingCancelled:
+        raise
     except Exception as e:
         log(f"Error calculating NFP for {cache_key}: {e}", level="error")
         nfp_data = {'error': str(e)}
+    check_cancel(cancel_callback)
     with Shape.nfp_cache_lock:
         Shape.nfp_cache[cache_key] = nfp_data
     return nfp_data
@@ -108,7 +118,7 @@ class MinkowskiEngine:
     Handles geometric operations for Minkowski nesting, such as NFP generation,
     candidate point finding, and placement validation.
     """
-    def __init__(self, bin_width, bin_height, step_size, discretize_edges=True, log_callback=None, verbose=False, search_direction=(0, -1), rng=None):
+    def __init__(self, bin_width, bin_height, step_size, discretize_edges=True, log_callback=None, verbose=False, search_direction=(0, -1), rng=None, cancel_callback=None):
         self.bin_width = bin_width
         self.bin_height = bin_height
         self.step_size = step_size
@@ -118,6 +128,7 @@ class MinkowskiEngine:
         
         self.search_direction = search_direction
         self.rng = rng
+        self.cancel_callback = cancel_callback
         self._log_lock = Lock()
 
         self.bin_polygon = Polygon([(0, 0), (self.bin_width, 0), (self.bin_width, self.bin_height), (0, self.bin_height)])
@@ -219,14 +230,16 @@ class MinkowskiEngine:
         tol = 1e-7
         grid = max(1.0, self.step_size)
         rminx, rminy, rmaxx, rmaxy = part_extents
+        edge = sheet.edge_spacing
 
         def _bounds_ok(pts):
-            return ((pts[:, 0] + rminx >= -tol) & (pts[:, 0] + rmaxx <= self.bin_width + tol) &
-                    (pts[:, 1] + rminy >= -tol) & (pts[:, 1] + rmaxy <= self.bin_height + tol))
+            return ((pts[:, 0] + rminx >= edge - tol) & (pts[:, 0] + rmaxx <= self.bin_width - edge + tol) &
+                    (pts[:, 1] + rminy >= edge - tol) & (pts[:, 1] + rmaxy <= self.bin_height - edge + tol))
 
         def _drop_inside(polys, pts, keep):
             """Clear keep-mask bits for points strictly inside any poly."""
             for poly in polys:
+                check_cancel(self.cancel_callback)
                 if not keep.any():
                     return
                 bx0, by0, bx1, by1 = poly.bounds
@@ -237,7 +250,13 @@ class MinkowskiEngine:
                 hits = idx[in_bbox]
                 if len(hits):
                     inside = shapely.contains_xy(poly, pts[hits, 0], pts[hits, 1])
-                    keep[hits[inside]] = False
+                    inside_hits = hits[inside]
+                    if len(inside_hits):
+                        # Exact-spacing contacts can land a few ulps inside
+                        # the NFP after translation, especially at flush edges.
+                        touching = shapely.dwithin(
+                            poly.boundary, shapely.points(pts[inside_hits]), tol)
+                        keep[inside_hits[~touching]] = False
 
         if entry['pts'] is None:
             seed = np.asarray(corner_candidates, dtype=np.float64).reshape(-1, 2)
@@ -258,6 +277,7 @@ class MinkowskiEngine:
         new_pt_arrays = []
 
         for p in sheet.parts[n_prev:m]:
+            check_cancel(self.cancel_callback)
             placed_angle = p.angle
             nfp_cache_key, relative_angle = self._nfp_cache_key(p.shape, placed_angle, part_to_place, part_label, angle)
             nfp_data = Shape.nfp_cache.get(nfp_cache_key)
@@ -327,6 +347,8 @@ class MinkowskiEngine:
                 seen = entry['seen']
                 rows = []
                 for i in first_idx:
+                    if i % 256 == 0:
+                        check_cancel(self.cancel_callback)
                     gkey = (int(gridded[i, 0]), int(gridded[i, 1]))
                     if gkey not in seen:
                         seen.add(gkey)
@@ -378,7 +400,8 @@ class MinkowskiEngine:
         return best_idx, metric
 
     def _calculate_and_cache_nfp(self, shape_A, angle_A, part_to_place, angle_B, cache_key):
-        return compute_and_cache_nfp(shape_A, angle_A, part_to_place, angle_B, cache_key, self.log, self.step_size)
+        return compute_and_cache_nfp(shape_A, angle_A, part_to_place, angle_B, cache_key, self.log, self.step_size,
+                                     cancel_callback=self.cancel_callback)
 
     def get_perf_stats(self):
         with self._perf_lock:

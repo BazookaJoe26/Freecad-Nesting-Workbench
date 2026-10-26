@@ -15,6 +15,8 @@ from .physics_engine import PhysicsEngine, RADIUS_MIN_MM, RADIUS_MAX_MM
 from .collision_resolver import CollisionResolver
 from .input_manager import InputManager
 from ...constants import SHEET_BOUNDARY_PREFIX
+from ...freecad_helpers import create_sheet_shape
+from ...layout_offsets import bind_layout_offset, layout_offset, set_layout_placement
 
 def _compute_physics_frame(
     working_cache,
@@ -463,7 +465,7 @@ class ManualNesterToolObserver:
             drag_delta = new_pos - self.selected_obj.Placement.Base
 
             new_placement.Base = new_pos
-            self.selected_obj.Placement = new_placement
+            set_layout_placement(self.selected_obj, new_placement)
 
             # Clamp the dragged part to whichever sheet the cursor is over.
             # If cursor is between sheets, fall back to the part's current sheet.
@@ -514,7 +516,7 @@ class ManualNesterToolObserver:
             rot = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), angle_deg)
             new_placement = self.start_placement.copy()
             new_placement.Rotation = rot.multiply(self.start_placement.Rotation)
-            self.selected_obj.Placement = new_placement
+            set_layout_placement(self.selected_obj, new_placement)
 
             # Show radius indicator even in rotation mode if physics active
             if self.physics_enabled:
@@ -687,7 +689,7 @@ class ManualNesterToolObserver:
             p = self.selected_obj.Placement.copy()
             b = p.Base
             p.Base = type(b)(lx, ly, b.z)
-            self.selected_obj.Placement = p
+            set_layout_placement(self.selected_obj, p)
 
     def _get_same_sheet_others(self):
         """Return tracked objects on the same sheet as the currently dragged part, excluding it."""
@@ -706,7 +708,7 @@ class ManualNesterToolObserver:
         if self.collision_resolver.overlaps_any(self.selected_obj, others):
             # Snap back to where the drag started so the part can't be pushed into others
             if self._drag_origin_placement is not None:
-                self.selected_obj.Placement = self._drag_origin_placement.copy()
+                set_layout_placement(self.selected_obj, self._drag_origin_placement.copy())
                 # The origin may carry a different rotation (Shift-rotate mid-drag)
                 self.collision_resolver.invalidate(self.selected_obj)
 
@@ -742,7 +744,7 @@ class ManualNesterToolObserver:
             rot = FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), apply_deg)
             new_placement = self.selected_obj.Placement.copy()
             new_placement.Rotation = rot.multiply(self.selected_obj.Placement.Rotation)
-            self.selected_obj.Placement = new_placement
+            set_layout_placement(self.selected_obj, new_placement)
             return True
         return False
 
@@ -1036,7 +1038,7 @@ class ManualNesterToolObserver:
                 try:
                     pl = obj.Placement
                     pl.Base = FreeCAD.Vector(cached[0], cached[1], pl.Base.z)
-                    obj.Placement = pl
+                    set_layout_placement(obj, pl)
                 except Exception as e:
                     FreeCAD.Console.PrintWarning(f"[Coin3D] commit failed for {obj.Label}: {e}\n")
         self._detach_all_coin_disp_nodes()
@@ -1168,7 +1170,7 @@ class ManualNesterToolObserver:
         try:
             if self.selected_obj and hasattr(self, 'start_placement') and self.start_placement:
                  try:
-                     self.selected_obj.Placement = self.start_placement
+                     set_layout_placement(self.selected_obj, self.start_placement)
                  except Exception as e:
                      FreeCAD.Console.PrintWarning(f"[ManualNesterTool] Failed to revert selection: {e}\n")
         except Exception as e:
@@ -1345,7 +1347,7 @@ class ManualNesterToolObserver:
             for obj, placement in self.original_placements.items():
                 try:
                     if obj and obj.Name and obj in self.layout_group.Document.Objects:
-                        obj.Placement = placement
+                        set_layout_placement(obj, placement)
                 except Exception as e:
                     FreeCAD.Console.PrintWarning(f"[ManualNesterTool] Placement revert failed (object might be deleted): {e}\n")
 
@@ -1466,7 +1468,8 @@ class ManualNesterToolObserver:
         self.layout_group.addObject(sheet_group)
 
         # Find the rightmost edge and spacing of existing sheets
-        max_right = 0.0
+        offset = layout_offset(self.layout_group)
+        max_right = None
         spacing = width * 0.1  # default fallback
         sheet_origins = []
         for child in self.layout_group.Group:
@@ -1475,7 +1478,7 @@ class ManualNesterToolObserver:
                 if b and hasattr(b, "Shape"):
                     bb = b.Shape.BoundBox
                     right_edge = bb.XMax          # BoundBox already includes Placement
-                    if right_edge > max_right:
+                    if max_right is None or right_edge > max_right:
                         max_right = right_edge
                     sheet_origins.append(bb.XMin)  # Use actual left edge, not Placement.Base
 
@@ -1484,13 +1487,15 @@ class ManualNesterToolObserver:
         if len(sheet_origins) >= 2:
             spacing = sheet_origins[1] - sheet_origins[0] - width
 
-        offset_x = max_right + spacing if max_right > 0 else 0.0
+        offset_x = max_right + spacing if max_right is not None else offset.x
 
         # Add Boundary
         boundary = doc.addObject("Part::Feature", f"{SHEET_BOUNDARY_PREFIX}{index}")
-        import Part
-        boundary.Shape = Part.makePlane(width, height)
-        boundary.Placement = FreeCAD.Placement(FreeCAD.Vector(offset_x, 0, 0), FreeCAD.Rotation())
+        boundary.Shape = create_sheet_shape(
+            width, height, getattr(self.layout_group, 'SheetThickness', 3.0))
+        boundary.Placement = FreeCAD.Placement(FreeCAD.Vector(offset_x, offset.y, offset.z), FreeCAD.Rotation())
+        if hasattr(self.layout_group, 'OffsetX'):
+            bind_layout_offset(boundary, self.layout_group)
         sheet_group.addObject(boundary)
 
         # Add Shapes Group
@@ -1629,6 +1634,8 @@ class ManualNesterToolObserver:
 
         # Initial placement at cursor
         container.Placement = FreeCAD.Placement(self.start_pos, FreeCAD.Rotation())
+        if hasattr(self.layout_group, 'OffsetX'):
+            bind_layout_offset(container, self.layout_group)
 
         # Track for dragging
         self._track_single_object(container, None)

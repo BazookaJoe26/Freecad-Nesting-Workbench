@@ -3,23 +3,23 @@
     <context>
         <name>AboutCommand</name>
         <message>
-            <location filename="freecad\nestingworkbench\commands\command_about.py" line="20"/>
-            <location filename="freecad\nestingworkbench\commands\command_about.py" line="60"/>
+            <location filename="freecad\nestingworkbench\commands\command_about.py" line="19"/>
+            <location filename="freecad\nestingworkbench\commands\command_about.py" line="43"/>
             <source>About Nesting Workbench</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\commands\command_about.py" line="61"/>
+            <location filename="freecad\nestingworkbench\commands\command_about.py" line="44"/>
             <source>Shows the workbench version and a link to support development.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\commands\command_about.py" line="22"/>
+            <location filename="freecad\nestingworkbench\commands\command_about.py" line="21"/>
             <source>Support development on Patreon</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\commands\command_about.py" line="21"/>
+            <location filename="freecad\nestingworkbench\commands\command_about.py" line="20"/>
             <source>Version:</source>
             <translation type="unfinished"/>
         </message>
@@ -222,217 +222,232 @@ Use the 'OK' button to save changes or 'Cancel' to revert.</source>
     <context>
         <name>NestingPanel</name>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="191"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="214"/>
             <source>&lt;b&gt;Curve Angle (Tessellation Quality):&lt;/b&gt;&lt;br&gt;Maximum angular deviation when approximating curves.&lt;br&gt;&lt;br&gt;&lt;b&gt;Smaller (5-10°):&lt;/b&gt; Smoother curves, more points, slower.&lt;br&gt;&lt;b&gt;Larger (20-45°):&lt;/b&gt; Coarser curves, fewer points, faster.&lt;br&gt;&lt;br&gt;&lt;i&gt;Tip: 10° is good for most parts. Use 5° for precision, 30°+ for speed.&lt;/i&gt;</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="67"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="68"/>
             <source>&lt;b&gt;Generations:&lt;/b&gt;&lt;br&gt;Number of evolutionary optimization cycles.&lt;br&gt;&lt;br&gt;&lt;b&gt;Default (1):&lt;/b&gt; Single pass without evolutionary iteration.&lt;br&gt;&lt;b&gt;Balanced (10):&lt;/b&gt; Paired with population 10; the winning layout appeared by generation 3 on average (generation 6 at the latest) on rectangular parts.&lt;br&gt;&lt;b&gt;Thorough (20):&lt;/b&gt; best measured packing, 1.67% better than greedy on rectangular parts.&lt;br&gt;&lt;b&gt;Large (&amp;gt;20):&lt;/b&gt; fitness was identical at 20 and 40 generations on both corpora, and stagnation detection halts early anyway, so extra generations cost time without changing the result.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="81"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="82"/>
             <source>&lt;b&gt;Optimization Preset:&lt;/b&gt;&lt;br&gt;Predefined population and generation configurations, sized from benchmark runs.&lt;br&gt;&lt;br&gt;&lt;b&gt;Default (1 pop, 1 gen):&lt;/b&gt; Fast seeded placement; matched greedy exactly on both corpora, in 0.11s or less.&lt;br&gt;&lt;b&gt;Balanced (10 pop, 10 gen):&lt;/b&gt; 1.02% better than greedy on rectangular parts and 0.79% on irregular parts, 16.4x the Default's run time (1.84s).&lt;br&gt;&lt;b&gt;Thorough (10 pop, 20 gen):&lt;/b&gt; Best measured packing, 1.67% better than greedy on rectangular parts, 17.1x the Default's run time (1.92s).</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="54"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="55"/>
             <source>&lt;b&gt;Population Size:&lt;/b&gt;&lt;br&gt;Number of candidate layouts evaluated per generation.&lt;br&gt;&lt;br&gt;&lt;b&gt;Default (1):&lt;/b&gt; Single seeded placement; matches greedy on both benchmarked corpora in under 0.11s.&lt;br&gt;&lt;b&gt;Balanced (10):&lt;/b&gt; paired with 10 generations, 1.02% better than greedy on rectangular parts and 0.79% on irregular parts, at 16.4x the Default's run time (1.84s).&lt;br&gt;&lt;b&gt;Larger (20-40):&lt;/b&gt; measured no better than 10 on either corpus, and costs proportionally more time.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="204"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="227"/>
             <source>&lt;b&gt;Simplification (Point Reduction):&lt;/b&gt;&lt;br&gt;Tolerance (mm) for removing redundant boundary points.&lt;br&gt;&lt;br&gt;&lt;b&gt;Smaller (0.1-0.5):&lt;/b&gt; More detailed boundaries, slower nesting.&lt;br&gt;&lt;b&gt;Larger (1.0-5.0):&lt;/b&gt; Simpler boundaries, faster nesting.&lt;br&gt;&lt;br&gt;&lt;i&gt;Tip: Set this to your machine's precision tolerance (e.g., 1mm for routers).&lt;/i&gt;</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="516"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="560"/>
             <source>Add Identifier Labels</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="591"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="636"/>
             <source>Add Selected</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="542"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="586"/>
             <source>Advanced Options</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="414"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="458"/>
             <source>Allow rotational perturbation during the annealing phase.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="420"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="464"/>
             <source>Allow translational perturbation during the annealing phase.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="412"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="456"/>
             <source>Anneal Rotate</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="492"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="536"/>
             <source>Anneal Steps:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="418"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="462"/>
             <source>Anneal Translate</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="484"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="528"/>
             <source>Annealing (Shake)</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="425"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="469"/>
             <source>Apply randomized perturbation direction during annealing instead of gravity direction.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="49"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="50"/>
             <source>Balanced (10 pop, 10 gen)</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="224"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="268"/>
             <source>Bounds Resolution:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="604"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="649"/>
             <source>Cancel Nesting</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="557"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="601"/>
             <source>Clear NFP Cache</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="341"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="385"/>
             <source>Click to learn more about how the Compactness function works.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="368"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="412"/>
             <source>Compactness:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="494"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="538"/>
             <source>Curve Type:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="220"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="264"/>
             <source>Curve:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="52"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="53"/>
             <source>Custom</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="435"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="195"/>
+            <source>Custom Edge Spacing</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="479"/>
             <source>Decay curve profile for rotational annealing temperature/amplitude over iterations.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="449"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="493"/>
             <source>Decay curve profile for translation annealing amplitude over iterations.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="48"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="49"/>
             <source>Default (1 pop, 1 gen)</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="714"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="760"/>
             <source>Define which direction is 'up' for this part when projecting to 2D.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="148"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="155"/>
             <source>Down</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="553"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="597"/>
             <source>Enables detailed logging of the nesting process in the FreeCAD console.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="588"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="633"/>
             <source>Fill</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="737"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="822"/>
             <source>Font Files (*.ttf *.otf)</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="559"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="603"/>
             <source>Forces recalculation of No-Fit Polygons. Slower, but resolves potential caching issues.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="889"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="943"/>
             <source>GA Compactness Optimization</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="366"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="410"/>
             <source>Generations:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="364"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="408"/>
             <source>Genetic Algorithm</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="478"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="632"/>
+            <source>Grain Dir</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="767"/>
+            <source>Grain axis in the same source coordinates as Up Dir. Must be perpendicular to Up Dir. Aligns with the sheet grain and allows a 180 degree turn only, overriding rotation steps. None allows normal rotations.</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="522"/>
             <source>Gravity Direction:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="534"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="578"/>
             <source>Height (Z):</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="641"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="686"/>
             <source>Identifier Font:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="241"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="285"/>
             <source>If checked, each part will use a randomized placement weighting.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="387"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="431"/>
             <source>If checked, randomized gravity direction will be applied.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="493"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="537"/>
             <source>Improvement Threshold:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="330"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="374"/>
             <source>Keeps the leftover material on the last sheet together as one large offcut
 instead of scattered gaps. 1.0 (default) is a balanced setting,
 higher favours a bigger offcut, 0 turns it off. Needs Generations
@@ -440,319 +455,364 @@ and Population Size above 1.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="149"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="156"/>
             <source>Left</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="496"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="540"/>
             <source>Max Amplitude:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="482"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="526"/>
             <source>Max Nesting Steps:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="481"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="525"/>
             <source>Max Spawn Attempts:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="398"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="442"/>
             <source>Maximum number of attempts to find an initial collision-free position for each part.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="403"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="447"/>
             <source>Maximum physics simulation steps per cycle before freezing placement.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="444"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="488"/>
             <source>Maximum rotation angle (degrees) applied at the start of annealing.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="458"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="502"/>
             <source>Maximum translation step (mm) applied at the start of annealing.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="495"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="539"/>
             <source>Min Amplitude:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="439"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="200"/>
+            <source>Minimum distance from the actual part outline to each sheet edge, independent of Part Spacing.</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="483"/>
             <source>Minimum rotation angle (degrees) applied at the end of annealing.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="463"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="507"/>
             <source>Minimum score improvement required to reset simulation cycle. Prevents infinite loops from noise.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="453"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="497"/>
             <source>Minimum translation step (mm) applied at the end of annealing.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="163"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="170"/>
             <source>Minkowski</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="231"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="275"/>
             <source>Minkowski Nesting Settings</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="168"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="254"/>
+            <source>Moves the complete layout, including sheets, parts and labels. Enter a length. Click fx to use a FreeCAD expression, e.g. Spreadsheet.OffsetX or Spreadsheet.OffsetX + 5 mm.</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="175"/>
             <source>Nesting Algorithm:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="245"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="289"/>
             <source>Nesting Direction:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="106"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="107"/>
             <source>Nesting Tool</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="507"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="551"/>
             <source>No Font Selected</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="93"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="763"/>
+            <source>None</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="94"/>
             <source>Note: Populations &gt; 40 or generations &gt; 20 offer diminishing returns and substantially increase runtime.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="430"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="474"/>
             <source>Number of rotational perturbation iterations during annealing.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="408"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="452"/>
             <source>Number of simulated annealing shake steps to settle parts into compact gaps.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="699"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="206"/>
+            <source>Optional material grain along sheet X (width) or Y (height). None disables grain constraints for all parts and uses normal rotation settings.</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="745"/>
             <source>Override global rotation steps for this part.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="703"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="749"/>
             <source>Override global rotation steps for this part. 0 or 1 means no rotation.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="217"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="241"/>
             <source>Part Spacing:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="164"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="171"/>
             <source>Physics</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="377"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="421"/>
             <source>Physics Nesting Settings</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="568"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="612"/>
             <source>Play sound on completion</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="367"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="411"/>
             <source>Population Size:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="365"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="409"/>
             <source>Preset:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="585"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="629"/>
             <source>Quantity</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="424"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="468"/>
             <source>Random Shake Direction</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="592"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="637"/>
             <source>Remove Selected</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="151"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="158"/>
             <source>Right</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="487"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="531"/>
             <source>Rot Anneal Steps:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="488"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="532"/>
             <source>Rot Curve Type:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="490"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="534"/>
             <source>Rot Max Angle:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="489"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="533"/>
             <source>Rot Min Angle:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="362"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="406"/>
             <source>Rotation Angle:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="486"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="530"/>
             <source>Rotation Steps:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="586"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="630"/>
             <source>Rotations</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="603"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="648"/>
             <source>Run Nesting</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="506"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="550"/>
             <source>Select Font</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="735"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="820"/>
             <source>Select Font File</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="620"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="665"/>
             <source>Select master shapes to nest.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="584"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="196"/>
+            <source>Set a separate distance between parts and sheet edges. Unchecked means no edge spacing.</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="628"/>
             <source>Shape</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="215"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="240"/>
+            <source>Sheet Grain Direction:</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="238"/>
             <source>Sheet Height:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="172"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="179"/>
             <source>Sheet Setup</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="216"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="239"/>
             <source>Sheet Thickness:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="214"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="237"/>
             <source>Sheet Width:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="563"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="607"/>
             <source>Show Bounds</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="222"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="266"/>
             <source>Simplify:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="546"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="590"/>
             <source>Simulate Nesting (slower)</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="393"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="437"/>
             <source>Simulation step size in mm per iteration. Smaller values increase accuracy but take longer.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="532"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="576"/>
             <source>Size:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="480"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="524"/>
             <source>Step Size:</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="527"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="571"/>
             <source>The height (Z-offset) for the identifier labels.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="718"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="784"/>
             <source>The quantity is always placed. If checked, extra copies are then added to fill the remaining space.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="522"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="566"/>
             <source>The text size for identifier labels in mm.</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="50"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="51"/>
             <source>Thorough (10 pop, 20 gen)</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="150"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="157"/>
             <source>Up</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="587"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="631"/>
             <source>Up Dir</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="240"/>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="386"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="284"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="430"/>
             <source>Use Random Direction</source>
             <translation type="unfinished"/>
         </message>
         <message>
-            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="551"/>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="595"/>
             <source>Verbose Logging</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="248"/>
+            <source>X Offset:</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="249"/>
+            <source>Y Offset:</source>
+            <translation type="unfinished"/>
+        </message>
+        <message>
+            <location filename="freecad\nestingworkbench\Tools\Nesting\ui_nesting.py" line="250"/>
+            <source>Z Offset:</source>
             <translation type="unfinished"/>
         </message>
     </context>

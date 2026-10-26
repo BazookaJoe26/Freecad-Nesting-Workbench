@@ -3,6 +3,8 @@ import random
 import math
 import FreeCAD
 from .base_nester import BaseNester
+from ....rotation_constraints import rotation_angles
+from ....edge_spacing import part_edge_extents
 
 class PhysicsNester(BaseNester):
     """
@@ -20,17 +22,18 @@ class PhysicsNester(BaseNester):
     def _spawn_part_on_sheet(self, shape, sheet):
         """Tries to place a shape at a random location without initial collision."""
         for _ in range(self.max_spawn_count):
-            if shape.rotation_steps > 1:
-                angle = random.randrange(shape.rotation_steps) * (360 / shape.rotation_steps)
-                shape.set_rotation(angle)
+            shape.set_rotation(random.choice(rotation_angles(shape, self.rotation_steps)))
 
-            _, _, w, h = shape.bounding_box()
-            
-            max_target_x = self._bin_width - w
-            max_target_y = self._bin_height - h
-            target_x = random.uniform(0, max_target_x) if max_target_x > 0 else 0
-            target_y = random.uniform(0, max_target_y) if max_target_y > 0 else 0
-            shape.move_to(target_x, target_y)
+            x0, y0, x1, y1 = part_edge_extents(shape, shape.angle)
+            edge = sheet.edge_spacing
+            min_x, max_x = edge - x0, self._bin_width - edge - x1
+            min_y, max_y = edge - y0, self._bin_height - edge - y1
+            if min_x > max_x + 1e-7 or min_y > max_y + 1e-7:
+                continue
+            target_x = random.uniform(min_x, max(min_x, max_x))
+            target_y = random.uniform(min_y, max(min_y, max_y))
+            center = shape.centroid
+            shape.move(target_x - center.x, target_y - center.y)
 
             if sheet.is_placement_valid(shape):
                 return shape
